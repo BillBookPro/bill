@@ -1250,7 +1250,7 @@
         resetOtpEmail = email;
         resetOtpExpiresAt = Date.now() + 10 * 60 * 1000;
         try {
-          emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+          emailjs.init({ publicKey: Ew1DjkFfQtrDnzmFY });
           await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
             to_email: email, to_name: email.split('@')[0], otp: resetOtp, app_name: 'BillPro'
           });
