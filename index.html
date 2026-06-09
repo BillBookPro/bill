@@ -1,1430 +1,1385 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BillPro - Business Billing Software</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
-  <style>
-    :root {
-      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --bg: #f0f2f5;
-      --panel: #ffffff;
-      --text: #1a1a2e;
-      --muted: #666;
-      --border: #e0e0e0;
-      --blue: #4361ee;
-      --blue-dark: #3a56d4;
-      --green: #06d6a0;
-      --amber: #ff9f1c;
-      --red: #ef476f;
-      --radius: 10px;
-      --shadow: 0 4px 6px rgba(0,0,0,0.07);
-    }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BillPro - Billing Software</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: var(--font-sans);
-      background: var(--bg);
-      color: var(--text);
-    }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+        }
 
-    button, input, select { font: inherit; }
-    button { cursor: pointer; border: none; }
+        /* Auth Screen */
+        .auth-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
 
-    /* Auth Screen */
-    body.auth-locked .app { display: none; }
-    body:not(.auth-locked) .auth-screen { display: none; }
+        .auth-card {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
 
-    .auth-screen {
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
+        .auth-card .logo {
+            text-align: center;
+            font-size: 32px;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 30px;
+        }
 
-    .auth-card {
-      background: white;
-      border-radius: 20px;
-      padding: 40px;
-      width: 100%;
-      max-width: 420px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-    }
+        .auth-card h2 {
+            text-align: center;
+            margin-bottom: 10px;
+        }
 
-    .auth-card .logo {
-      text-align: center;
-      margin-bottom: 30px;
-      font-size: 32px;
-      font-weight: bold;
-      color: var(--blue);
-    }
+        .auth-card p {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
 
-    .auth-card h1 {
-      font-size: 28px;
-      margin-bottom: 10px;
-      text-align: center;
-    }
+        .input-group {
+            margin-bottom: 20px;
+        }
 
-    .auth-card p {
-      text-align: center;
-      color: var(--muted);
-      margin-bottom: 30px;
-    }
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #333;
+        }
 
-    .form-group {
-      margin-bottom: 20px;
-    }
+        .input-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+        }
 
-    .form-group label {
-      display: block;
-      margin-bottom: 8px;
-      font-weight: 500;
-      color: var(--text);
-    }
+        .input-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
 
-    .form-group input {
-      width: 100%;
-      padding: 12px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 16px;
-      transition: all 0.3s;
-    }
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
 
-    .form-group input:focus {
-      outline: none;
-      border-color: var(--blue);
-      box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.1);
-    }
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
 
-    .btn {
-      padding: 12px 20px;
-      border-radius: 8px;
-      font-weight: 600;
-      transition: all 0.3s;
-    }
+        .btn-primary:hover {
+            background: #5a67d8;
+            transform: translateY(-1px);
+        }
 
-    .btn-primary {
-      background: var(--blue);
-      color: white;
-      width: 100%;
-    }
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+            margin-top: 10px;
+        }
 
-    .btn-primary:hover {
-      background: var(--blue-dark);
-      transform: translateY(-1px);
-    }
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
 
-    .btn-secondary {
-      background: #f0f0f0;
-      color: var(--text);
-      width: 100%;
-      margin-top: 10px;
-    }
+        .btn-link {
+            background: none;
+            color: #667eea;
+            margin-top: 15px;
+        }
 
-    .btn-secondary:hover {
-      background: #e0e0e0;
-    }
+        .message {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 14px;
+        }
 
-    .link-btn {
-      background: none;
-      color: var(--blue);
-      margin-top: 15px;
-      width: 100%;
-      text-align: center;
-    }
+        .error-message {
+            background: #fee;
+            color: #c33;
+        }
 
-    .error-message {
-      color: var(--red);
-      font-size: 14px;
-      margin-top: 10px;
-      text-align: center;
-    }
+        .success-message {
+            background: #efe;
+            color: #3c3;
+        }
 
-    .success-message {
-      color: var(--green);
-      font-size: 14px;
-      margin-top: 10px;
-      text-align: center;
-    }
+        /* App Layout */
+        .app {
+            display: none;
+        }
 
-    /* App Layout */
-    .app {
-      display: flex;
-      min-height: 100vh;
-    }
+        body.logged-in .auth-container {
+            display: none;
+        }
 
-    /* Sidebar */
-    .sidebar {
-      width: 260px;
-      background: var(--panel);
-      border-right: 1px solid var(--border);
-      padding: 20px 0;
-    }
+        body.logged-in .app {
+            display: flex;
+        }
 
-    .brand {
-      padding: 0 20px 20px 20px;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 20px;
-    }
+        .app {
+            display: flex;
+            min-height: 100vh;
+        }
 
-    .logo {
-      font-size: 24px;
-      font-weight: bold;
-      color: var(--blue);
-    }
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background: white;
+            border-right: 1px solid #e0e0e0;
+            padding: 20px 0;
+        }
 
-    .logo span {
-      color: var(--text);
-    }
+        .sidebar .logo {
+            padding: 0 20px 20px 20px;
+            border-bottom: 1px solid #e0e0e0;
+            margin-bottom: 20px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
 
-    .nav-item {
-      width: 100%;
-      padding: 12px 20px;
-      text-align: left;
-      background: transparent;
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      transition: all 0.3s;
-    }
+        .nav-item {
+            width: 100%;
+            padding: 12px 20px;
+            text-align: left;
+            background: none;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 16px;
+            color: #555;
+            transition: all 0.3s;
+        }
 
-    .nav-item:hover {
-      background: #f5f5f5;
-    }
+        .nav-item:hover {
+            background: #f5f5f5;
+        }
 
-    .nav-item.active {
-      background: var(--blue);
-      color: white;
-    }
+        .nav-item.active {
+            background: #667eea;
+            color: white;
+        }
 
-    .nav-item i {
-      font-size: 20px;
-    }
+        /* Main Content */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
 
-    /* Main Content */
-    .main {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-    }
+        .header {
+            background: white;
+            padding: 15px 30px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
 
-    .topbar {
-      background: var(--panel);
-      padding: 15px 30px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
+        .content {
+            padding: 30px;
+            overflow-y: auto;
+        }
 
-    .user-info {
-      display: flex;
-      align-items: center;
-      gap: 15px;
-    }
+        .page {
+            display: none;
+        }
 
-    .content {
-      padding: 30px;
-      overflow-y: auto;
-    }
+        .page.active {
+            display: block;
+        }
 
-    .page {
-      display: none;
-    }
+        /* Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
 
-    .page.active {
-      display: block;
-    }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
 
-    /* Cards */
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-      gap: 20px;
-      margin-bottom: 30px;
-    }
+        .stat-card h3 {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
 
-    .stat-card {
-      background: var(--panel);
-      padding: 20px;
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-    }
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #333;
+        }
 
-    .stat-card h3 {
-      font-size: 14px;
-      color: var(--muted);
-      margin-bottom: 10px;
-    }
+        /* Tables */
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
 
-    .stat-card .value {
-      font-size: 32px;
-      font-weight: bold;
-    }
+        .search-box {
+            flex: 1;
+            max-width: 300px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
 
-    /* Tables */
-    .toolbar {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 20px;
-      gap: 15px;
-      flex-wrap: wrap;
-    }
+        .card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            overflow-x: auto;
+        }
 
-    .search-box {
-      flex: 1;
-      max-width: 300px;
-      padding: 10px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-    }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
 
-    .card {
-      background: var(--panel);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      overflow-x: auto;
-    }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
-    }
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
 
-    th, td {
-      padding: 12px;
-      text-align: left;
-      border-bottom: 1px solid var(--border);
-    }
+        .badge {
+            padding: 4px 8px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
 
-    th {
-      background: #f8f9fa;
-      font-weight: 600;
-    }
+        .badge.paid { background: #d4edda; color: #155724; }
+        .badge.pending { background: #fff3cd; color: #856404; }
+        .badge.cancelled { background: #f8d7da; color: #721c24; }
 
-    .badge {
-      padding: 4px 8px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 600;
-    }
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
 
-    .badge.paid { background: #d4edda; color: #155724; }
-    .badge.pending { background: #fff3cd; color: #856404; }
-    .badge.cancelled { background: #f8d7da; color: #721c24; }
+        .modal.open {
+            display: flex;
+        }
 
-    /* Modal */
-    .modal {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0,0,0,0.5);
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    }
+        .modal-content {
+            background: white;
+            border-radius: 10px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
 
-    .modal.open {
-      display: flex;
-    }
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
 
-    .modal-content {
-      background: white;
-      border-radius: var(--radius);
-      max-width: 800px;
-      width: 90%;
-      max-height: 90vh;
-      overflow-y: auto;
-    }
+        .modal-body {
+            padding: 20px;
+        }
 
-    .modal-header {
-      padding: 20px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
+        .modal-footer {
+            padding: 20px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
 
-    .modal-body {
-      padding: 20px;
-    }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
 
-    .modal-footer {
-      padding: 20px;
-      border-top: 1px solid var(--border);
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
-    }
+        .form-group {
+            margin-bottom: 15px;
+        }
 
-    /* Forms */
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 15px;
-      margin-bottom: 15px;
-    }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
 
-    .form-group {
-      margin-bottom: 15px;
-    }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+        }
 
-    .form-group label {
-      display: block;
-      margin-bottom: 5px;
-      font-weight: 500;
-    }
+        .items-table {
+            width: 100%;
+            margin-top: 15px;
+        }
 
-    .form-group input, .form-group select {
-      width: 100%;
-      padding: 10px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-    }
+        .items-table th, .items-table td {
+            padding: 8px;
+        }
 
-    .items-table {
-      width: 100%;
-      margin-top: 15px;
-    }
+        .total-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            text-align: right;
+        }
 
-    .items-table th, .items-table td {
-      padding: 8px;
-    }
+        .grand-total {
+            font-size: 20px;
+            font-weight: bold;
+            color: #667eea;
+        }
 
-    .total-section {
-      margin-top: 20px;
-      padding: 15px;
-      background: #f8f9fa;
-      border-radius: 8px;
-      text-align: right;
-    }
+        button {
+            cursor: pointer;
+        }
 
-    .total-row {
-      margin: 5px 0;
-    }
+        .btn-icon {
+            padding: 5px 10px;
+            background: none;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
 
-    .grand-total {
-      font-size: 20px;
-      font-weight: bold;
-      color: var(--blue);
-    }
-
-    @media (max-width: 768px) {
-      .sidebar {
-        width: 70px;
-      }
-      .sidebar .brand span, .sidebar .nav-item span {
-        display: none;
-      }
-      .stats-grid {
-        grid-template-columns: 1fr;
-      }
-      .form-row {
-        grid-template-columns: 1fr;
-      }
-    }
-  </style>
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 70px;
+            }
+            .sidebar .logo span, .sidebar .nav-item span {
+                display: none;
+            }
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
 </head>
-<body class="auth-locked">
-  <!-- Auth Screen -->
-  <div class="auth-screen">
-    <div class="auth-card">
-      <div class="logo">📊 Bill<span>Pro</span></div>
-      <h1 id="auth-title">Welcome Back</h1>
-      <p id="auth-subtitle">Login to manage your business</p>
-      
-      <div class="form-group">
-        <label>Email Address</label>
-        <input type="email" id="login-email" placeholder="Enter your email">
-      </div>
-      
-      <div class="form-group">
-        <label>Password</label>
-        <input type="password" id="login-password" placeholder="Enter your password">
-      </div>
-      
-      <div id="auth-message"></div>
-      
-      <button class="btn btn-primary" id="auth-main-btn">Login</button>
-      <button class="btn btn-secondary" id="auth-switch-btn">Create Account</button>
-      <button class="btn link-btn" id="forgot-btn">Forgot Password?</button>
-    </div>
-  </div>
-
-  <!-- Main App -->
-  <div class="app">
-    <!-- Sidebar -->
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="logo">📊 Bill<span>Pro</span></div>
-      </div>
-      
-      <nav>
-        <button class="nav-item active" onclick="showPage('dashboard')">
-          <i class="ti ti-dashboard"></i> <span>Dashboard</span>
-        </button>
-        <button class="nav-item" onclick="showPage('sales')">
-          <i class="ti ti-receipt"></i> <span>Sales</span>
-        </button>
-        <button class="nav-item" onclick="showPage('purchase')">
-          <i class="ti ti-shopping-cart"></i> <span>Purchase</span>
-        </button>
-        <button class="nav-item" onclick="showPage('customers')">
-          <i class="ti ti-users"></i> <span>Customers</span>
-        </button>
-        <button class="nav-item" onclick="showPage('vendors')">
-          <i class="ti ti-building-store"></i> <span>Vendors</span>
-        </button>
-        <button class="nav-item" onclick="showPage('products')">
-          <i class="ti ti-package"></i> <span>Products</span>
-        </button>
-      </nav>
-    </aside>
-
-    <!-- Main Content -->
-    <main class="main">
-      <header class="topbar">
-        <h2 id="page-title">Dashboard</h2>
-        <div class="user-info">
-          <span id="user-email-display"></span>
-          <button class="btn" style="padding: 8px 15px;" onclick="logout()">Logout</button>
-        </div>
-      </header>
-
-      <div class="content">
-        <!-- Dashboard Page -->
-        <div id="page-dashboard" class="page active">
-          <div class="stats-grid" id="stats-grid"></div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-            <div class="card">
-              <div style="padding: 20px; border-bottom: 1px solid var(--border);">
-                <h3>Recent Sales</h3>
-              </div>
-              <div style="overflow-x: auto;">
-                <table id="recent-sales-table">
-                  <thead><tr><th>Invoice #</th><th>Customer</th><th>Amount</th><th>Status</th></tr></thead>
-                  <tbody></tbody>
-                </table>
-              </div>
+<body>
+    <!-- Auth Screen -->
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="logo">📊 BillPro</div>
+            <h2 id="auth-title">Welcome Back</h2>
+            <p id="auth-subtitle">Login to manage your business</p>
+            
+            <div class="input-group">
+                <label>Email Address</label>
+                <input type="email" id="login-email" placeholder="Enter your email">
             </div>
-            <div class="card">
-              <div style="padding: 20px; border-bottom: 1px solid var(--border);">
-                <h3>Recent Purchases</h3>
-              </div>
-              <div style="overflow-x: auto;">
-                <table id="recent-purchases-table">
-                  <thead><tr><th>Bill #</th><th>Vendor</th><th>Amount</th><th>Status</th></tr></thead>
-                  <tbody></tbody>
-                </table>
-              </div>
+            
+            <div class="input-group">
+                <label>Password</label>
+                <input type="password" id="login-password" placeholder="Enter your password">
             </div>
-          </div>
+            
+            <div id="auth-message"></div>
+            
+            <button class="btn btn-primary" id="auth-main-btn">Login</button>
+            <button class="btn btn-secondary" id="auth-switch-btn">Create Account</button>
+            <button class="btn btn-link" id="forgot-btn">Forgot Password?</button>
         </div>
-
-        <!-- Sales Page -->
-        <div id="page-sales" class="page">
-          <div class="toolbar">
-            <input type="text" class="search-box" placeholder="Search invoices..." id="search-sales" onkeyup="filterSales()">
-            <button class="btn btn-primary" onclick="openInvoiceModal('sale')">+ New Invoice</button>
-          </div>
-          <div class="card">
-            <table id="sales-table">
-              <thead>
-                <tr><th>#</th><th>Invoice No</th><th>Customer</th><th>Date</th><th>Total</th><th>Status</th><th>Actions</th></tr>
-              </thead>
-              <tbody id="sales-list"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Purchase Page -->
-        <div id="page-purchase" class="page">
-          <div class="toolbar">
-            <input type="text" class="search-box" placeholder="Search bills..." id="search-purchase" onkeyup="filterPurchase()">
-            <button class="btn btn-primary" onclick="openInvoiceModal('purchase')">+ New Purchase</button>
-          </div>
-          <div class="card">
-            <table id="purchase-table">
-              <thead>
-                <tr><th>#</th><th>Bill No</th><th>Vendor</th><th>Date</th><th>Total</th><th>Status</th><th>Actions</th></tr>
-              </thead>
-              <tbody id="purchase-list"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Customers Page -->
-        <div id="page-customers" class="page">
-          <div class="toolbar">
-            <input type="text" class="search-box" placeholder="Search customers..." id="search-customers" onkeyup="filterCustomers()">
-            <button class="btn btn-primary" onclick="openPartyModal('customer')">+ Add Customer</button>
-          </div>
-          <div class="card">
-            <table id="customers-table">
-              <thead>
-                <tr><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Total Amount</th></tr>
-              </thead>
-              <tbody id="customers-list"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Vendors Page -->
-        <div id="page-vendors" class="page">
-          <div class="toolbar">
-            <input type="text" class="search-box" placeholder="Search vendors..." id="search-vendors" onkeyup="filterVendors()">
-            <button class="btn btn-primary" onclick="openPartyModal('vendor')">+ Add Vendor</button>
-          </div>
-          <div class="card">
-            <table id="vendors-table">
-              <thead>
-                <tr><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Total Amount</th></tr>
-              </thead>
-              <tbody id="vendors-list"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Products Page -->
-        <div id="page-products" class="page">
-          <div class="toolbar">
-            <input type="text" class="search-box" placeholder="Search products..." id="search-products" onkeyup="filterProducts()">
-            <button class="btn btn-primary" onclick="openProductModal()">+ Add Product</button>
-          </div>
-          <div class="card">
-            <table id="products-table">
-              <thead>
-                <tr><th>Name</th><th>Unit</th><th>Sale Price</th><th>Purchase Price</th><th>GST%</th><th>Stock</th><th>Actions</th></tr>
-              </thead>
-              <tbody id="products-list"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </main>
-  </div>
-
-  <!-- Invoice Modal -->
-  <div id="invoice-modal" class="modal">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3 id="invoice-modal-title">New Invoice</h3>
-        <button class="btn" onclick="closeModal('invoice-modal')">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-row">
-          <div class="form-group">
-            <label>Party Name</label>
-            <input type="text" id="party-name" placeholder="Customer/Vendor name">
-          </div>
-          <div class="form-group">
-            <label>Invoice/Bill No</label>
-            <input type="text" id="invoice-number" placeholder="INV-001">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Date</label>
-            <input type="date" id="invoice-date">
-          </div>
-          <div class="form-group">
-            <label>Status</label>
-            <select id="invoice-status">
-              <option value="pending">Pending</option>
-              <option value="paid">Paid</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-          </div>
-        </div>
-        
-        <h4>Items</h4>
-        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-          <input type="text" id="item-name" placeholder="Product name" style="flex: 2;">
-          <input type="number" id="item-qty" placeholder="Qty" style="flex: 1;">
-          <input type="number" id="item-price" placeholder="Price" style="flex: 1;">
-          <input type="number" id="item-gst" placeholder="GST%" style="flex: 1;" value="18">
-          <button class="btn btn-primary" onclick="addItem()">Add</button>
-        </div>
-        
-        <table class="items-table">
-          <thead>
-            <tr><th>Product</th><th>Qty</th><th>Price</th><th>GST%</th><th>Total</th><th></th></tr>
-          </thead>
-          <tbody id="items-list"></tbody>
-        </table>
-        
-        <div class="total-section">
-          <div class="total-row">Subtotal: ₹<span id="subtotal">0</span></div>
-          <div class="total-row">GST: ₹<span id="gst-total">0</span></div>
-          <div class="total-row grand-total">Grand Total: ₹<span id="grand-total">0</span></div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="closeModal('invoice-modal')">Cancel</button>
-        <button class="btn btn-primary" onclick="saveInvoice()">Save</button>
-      </div>
     </div>
-  </div>
 
-  <!-- Party Modal -->
-  <div id="party-modal" class="modal">
-    <div class="modal-content" style="max-width: 500px;">
-      <div class="modal-header">
-        <h3 id="party-modal-title">Add Party</h3>
-        <button class="btn" onclick="closeModal('party-modal')">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label>Name</label>
-          <input type="text" id="party-add-name">
+    <!-- Main App -->
+    <div class="app">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="logo">📊 <span>BillPro</span></div>
+            <button class="nav-item active" onclick="showPage('dashboard')">
+                <i class="ti ti-dashboard"></i> <span>Dashboard</span>
+            </button>
+            <button class="nav-item" onclick="showPage('sales')">
+                <i class="ti ti-receipt"></i> <span>Sales</span>
+            </button>
+            <button class="nav-item" onclick="showPage('purchase')">
+                <i class="ti ti-shopping-cart"></i> <span>Purchase</span>
+            </button>
+            <button class="nav-item" onclick="showPage('customers')">
+                <i class="ti ti-users"></i> <span>Customers</span>
+            </button>
+            <button class="nav-item" onclick="showPage('vendors')">
+                <i class="ti ti-building-store"></i> <span>Vendors</span>
+            </button>
+            <button class="nav-item" onclick="showPage('products')">
+                <i class="ti ti-package"></i> <span>Products</span>
+            </button>
         </div>
-        <div class="form-group">
-          <label>Phone</label>
-          <input type="text" id="party-add-phone">
+
+        <!-- Main Content -->
+        <div class="main">
+            <div class="header">
+                <h2 id="page-title">Dashboard</h2>
+                <div>
+                    <span id="user-email" style="margin-right: 15px;"></span>
+                    <button class="btn-icon" onclick="logout()">Logout</button>
+                </div>
+            </div>
+
+            <div class="content">
+                <!-- Dashboard Page -->
+                <div id="page-dashboard" class="page active">
+                    <div class="stats-grid" id="stats-grid"></div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div class="card">
+                            <div style="padding: 20px; border-bottom: 1px solid #e0e0e0;">
+                                <h3>Recent Sales</h3>
+                            </div>
+                            <table id="recent-sales-table">
+                                <thead><tr><th>Invoice #</th><th>Customer</th><th>Amount</th><th>Status</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="card">
+                            <div style="padding: 20px; border-bottom: 1px solid #e0e0e0;">
+                                <h3>Recent Purchases</h3>
+                            </div>
+                            <table id="recent-purchases-table">
+                                <thead><tr><th>Bill #</th><th>Vendor</th><th>Amount</th><th>Status</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sales Page -->
+                <div id="page-sales" class="page">
+                    <div class="toolbar">
+                        <input type="text" class="search-box" placeholder="Search invoices..." id="search-sales" onkeyup="filterSales()">
+                        <button class="btn-primary" style="width: auto; padding: 10px 20px;" onclick="openInvoiceModal('sale')">+ New Invoice</button>
+                    </div>
+                    <div class="card">
+                        <table id="sales-table">
+                            <thead><tr><th>#</th><th>Invoice No</th><th>Customer</th><th>Date</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead>
+                            <tbody id="sales-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Purchase Page -->
+                <div id="page-purchase" class="page">
+                    <div class="toolbar">
+                        <input type="text" class="search-box" placeholder="Search bills..." id="search-purchase" onkeyup="filterPurchase()">
+                        <button class="btn-primary" style="width: auto; padding: 10px 20px;" onclick="openInvoiceModal('purchase')">+ New Purchase</button>
+                    </div>
+                    <div class="card">
+                        <table id="purchase-table">
+                            <thead><tr><th>#</th><th>Bill No</th><th>Vendor</th><th>Date</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead>
+                            <tbody id="purchase-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Customers Page -->
+                <div id="page-customers" class="page">
+                    <div class="toolbar">
+                        <input type="text" class="search-box" placeholder="Search customers..." id="search-customers" onkeyup="filterCustomers()">
+                        <button class="btn-primary" style="width: auto; padding: 10px 20px;" onclick="openPartyModal('customer')">+ Add Customer</button>
+                    </div>
+                    <div class="card">
+                        <table id="customers-table">
+                            <thead><tr><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Total Amount</th></tr></thead>
+                            <tbody id="customers-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Vendors Page -->
+                <div id="page-vendors" class="page">
+                    <div class="toolbar">
+                        <input type="text" class="search-box" placeholder="Search vendors..." id="search-vendors" onkeyup="filterVendors()">
+                        <button class="btn-primary" style="width: auto; padding: 10px 20px;" onclick="openPartyModal('vendor')">+ Add Vendor</button>
+                    </div>
+                    <div class="card">
+                        <table id="vendors-table">
+                            <thead><tr><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Total Amount</th></tr></thead>
+                            <tbody id="vendors-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Products Page -->
+                <div id="page-products" class="page">
+                    <div class="toolbar">
+                        <input type="text" class="search-box" placeholder="Search products..." id="search-products" onkeyup="filterProducts()">
+                        <button class="btn-primary" style="width: auto; padding: 10px 20px;" onclick="openProductModal()">+ Add Product</button>
+                    </div>
+                    <div class="card">
+                        <table id="products-table">
+                            <thead><tr><th>Name</th><th>Unit</th><th>Sale Price</th><th>Purchase Price</th><th>GST%</th><th>Stock</th><th>Actions</th></tr></thead>
+                            <tbody id="products-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </div>
-        <div class="form-group">
-          <label>GSTIN</label>
-          <input type="text" id="party-add-gstin">
-        </div>
-        <div class="form-group">
-          <label>Address</label>
-          <input type="text" id="party-add-address">
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="closeModal('party-modal')">Cancel</button>
-        <button class="btn btn-primary" onclick="saveParty()">Save</button>
-      </div>
     </div>
-  </div>
 
-  <!-- Product Modal -->
-  <div id="product-modal" class="modal">
-    <div class="modal-content" style="max-width: 600px;">
-      <div class="modal-header">
-        <h3>Add Product</h3>
-        <button class="btn" onclick="closeModal('product-modal')">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-row">
-          <div class="form-group">
-            <label>Product Name</label>
-            <input type="text" id="product-add-name">
-          </div>
-          <div class="form-group">
-            <label>Unit</label>
-            <input type="text" id="product-add-unit" placeholder="pcs, kg, box">
-          </div>
+    <!-- Invoice Modal -->
+    <div id="invoice-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="invoice-modal-title">New Invoice</h3>
+                <button class="btn-icon" onclick="closeModal('invoice-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Party Name *</label>
+                        <input type="text" id="party-name" placeholder="Customer/Vendor name">
+                    </div>
+                    <div class="form-group">
+                        <label>Invoice/Bill No</label>
+                        <input type="text" id="invoice-number" placeholder="INV-001">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Date</label>
+                        <input type="date" id="invoice-date">
+                    </div>
+                    <div class="form-group">
+                        <label>Status</label>
+                        <select id="invoice-status">
+                            <option value="pending">Pending</option>
+                            <option value="paid">Paid</option>
+                            <option value="cancelled">Cancelled</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <h4>Items</h4>
+                <div style="display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
+                    <input type="text" id="item-name" placeholder="Product name" style="flex: 2; padding: 8px;">
+                    <input type="number" id="item-qty" placeholder="Qty" style="flex: 1; padding: 8px;">
+                    <input type="number" id="item-price" placeholder="Price" style="flex: 1; padding: 8px;">
+                    <input type="number" id="item-gst" placeholder="GST%" style="flex: 1; padding: 8px;" value="18">
+                    <button class="btn-primary" style="width: auto; padding: 8px 15px;" onclick="addItem()">Add</button>
+                </div>
+                
+                <table class="items-table">
+                    <thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>GST%</th><th>Total</th><th></th></tr></thead>
+                    <tbody id="items-list"></tbody>
+                </table>
+                
+                <div class="total-section">
+                    <div>Subtotal: ₹<span id="subtotal">0</span></div>
+                    <div>GST: ₹<span id="gst-total">0</span></div>
+                    <div class="grand-total">Grand Total: ₹<span id="grand-total">0</span></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-icon" onclick="closeModal('invoice-modal')">Cancel</button>
+                <button class="btn-primary" onclick="saveInvoice()">Save</button>
+            </div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Sale Price</label>
-            <input type="number" id="product-add-sale-price">
-          </div>
-          <div class="form-group">
-            <label>Purchase Price</label>
-            <input type="number" id="product-add-purchase-price">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>GST %</label>
-            <input type="number" id="product-add-gst" value="18">
-          </div>
-          <div class="form-group">
-            <label>Stock</label>
-            <input type="number" id="product-add-stock" value="0">
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" onclick="closeModal('product-modal')">Cancel</button>
-        <button class="btn btn-primary" onclick="saveProduct()">Save</button>
-      </div>
     </div>
-  </div>
 
-  <script type="module">
-    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-    import { 
-      getAuth, 
-      createUserWithEmailAndPassword, 
-      signInWithEmailAndPassword,
-      sendPasswordResetEmail,
-      onAuthStateChanged,
-      signOut
-    } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-    import {
-      getFirestore,
-      doc,
-      setDoc,
-      getDoc,
-      enableIndexedDbPersistence
-    } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+    <!-- Party Modal -->
+    <div id="party-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3 id="party-modal-title">Add Party</h3>
+                <button class="btn-icon" onclick="closeModal('party-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Name *</label>
+                    <input type="text" id="party-add-name">
+                </div>
+                <div class="form-group">
+                    <label>Phone</label>
+                    <input type="text" id="party-add-phone">
+                </div>
+                <div class="form-group">
+                    <label>GSTIN</label>
+                    <input type="text" id="party-add-gstin">
+                </div>
+                <div class="form-group">
+                    <label>Address</label>
+                    <input type="text" id="party-add-address">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-icon" onclick="closeModal('party-modal')">Cancel</button>
+                <button class="btn-primary" onclick="saveParty()">Save</button>
+            </div>
+        </div>
+    </div>
 
-    // Firebase Configuration
-    const firebaseConfig = {
-      apiKey: "AIzaSyBy8UEKBowJP1Vp4QHO4asjPxmgq_UfODM",
-      authDomain: "bill-book-pro-93155.firebaseapp.com",
-      projectId: "bill-book-pro-93155",
-      storageBucket: "bill-book-pro-93155.firebasestorage.app",
-      messagingSenderId: "409759386921",
-      appId: "1:409759386921:web:d557714d258ba865a67b38"
-    };
+    <!-- Product Modal -->
+    <div id="product-modal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3>Add Product</h3>
+                <button class="btn-icon" onclick="closeModal('product-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Product Name *</label>
+                        <input type="text" id="product-add-name">
+                    </div>
+                    <div class="form-group">
+                        <label>Unit</label>
+                        <input type="text" id="product-add-unit" placeholder="pcs, kg, box">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Sale Price</label>
+                        <input type="number" id="product-add-sale-price">
+                    </div>
+                    <div class="form-group">
+                        <label>Purchase Price</label>
+                        <input type="number" id="product-add-purchase-price">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>GST %</label>
+                        <input type="number" id="product-add-gst" value="18">
+                    </div>
+                    <div class="form-group">
+                        <label>Stock</label>
+                        <input type="number" id="product-add-stock" value="0">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-icon" onclick="closeModal('product-modal')">Cancel</button>
+                <button class="btn-primary" onclick="saveProduct()">Save</button>
+            </div>
+        </div>
+    </div>
 
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-    
-    try { enableIndexedDbPersistence(db); } catch(e) { console.log("Offline persistence not available"); }
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+        import { 
+            getAuth, 
+            createUserWithEmailAndPassword, 
+            signInWithEmailAndPassword,
+            sendPasswordResetEmail,
+            onAuthStateChanged,
+            signOut
+        } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+        import {
+            getFirestore,
+            doc,
+            setDoc,
+            getDoc
+        } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
-    // App State
-    let currentUser = null;
-    let appData = {
-      sales: [],
-      purchases: [],
-      customers: [],
-      vendors: [],
-      products: []
-    };
-    let currentInvoiceType = 'sale';
-    let currentItems = [];
-    let currentPartyType = 'customer';
-    let editingIndex = -1;
+        // Firebase Config - Aapka existing config
+        const firebaseConfig = {
+            apiKey: "AIzaSyBy8UEKBowJP1Vp4QHO4asjPxmgq_UfODM",
+            authDomain: "bill-book-pro-93155.firebaseapp.com",
+            projectId: "bill-book-pro-93155",
+            storageBucket: "bill-book-pro-93155.firebasestorage.app",
+            messagingSenderId: "409759386921",
+            appId: "1:409759386921:web:d557714d258ba865a67b38"
+        };
 
-    // Helper Functions
-    function formatCurrency(amount) {
-      return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount || 0);
-    }
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
 
-    function calculateItemTotal(item) {
-      const subtotal = (item.qty || 0) * (item.price || 0);
-      const gstAmount = subtotal * (item.gst || 0) / 100;
-      return subtotal + gstAmount;
-    }
+        // App State
+        let currentUser = null;
+        let appData = {
+            sales: [],
+            purchases: [],
+            customers: [],
+            vendors: [],
+            products: []
+        };
+        let currentInvoiceType = 'sale';
+        let currentItems = [];
+        let currentPartyType = 'customer';
+        let editingIndex = -1;
 
-    function calculateTotals(items) {
-      let subtotal = 0, gst = 0;
-      items.forEach(item => {
-        const sub = (item.qty || 0) * (item.price || 0);
-        subtotal += sub;
-        gst += sub * (item.gst || 0) / 100;
-      });
-      return { subtotal, gst, total: subtotal + gst };
-    }
+        // Helper Functions
+        function formatCurrency(amount) {
+            return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount || 0);
+        }
 
-    async function saveToFirestore() {
-      if (!currentUser) return;
-      try {
-        await setDoc(doc(db, 'users', currentUser.uid), {
-          data: appData,
-          updatedAt: new Date().toISOString()
+        function calculateItemTotal(item) {
+            const subtotal = (item.qty || 0) * (item.price || 0);
+            const gstAmount = subtotal * (item.gst || 0) / 100;
+            return subtotal + gstAmount;
+        }
+
+        function calculateTotals(items) {
+            let subtotal = 0, gst = 0;
+            items.forEach(item => {
+                const sub = (item.qty || 0) * (item.price || 0);
+                subtotal += sub;
+                gst += sub * (item.gst || 0) / 100;
+            });
+            return { subtotal, gst, total: subtotal + gst };
+        }
+
+        async function saveToFirestore() {
+            if (!currentUser) return;
+            try {
+                await setDoc(doc(db, 'users', currentUser.uid), {
+                    email: currentUser.email,
+                    data: appData,
+                    updatedAt: new Date().toISOString()
+                });
+            } catch(e) {
+                console.error("Save error:", e);
+            }
+        }
+
+        async function loadFromFirestore() {
+            if (!currentUser) return;
+            try {
+                const docRef = doc(db, 'users', currentUser.uid);
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    const savedData = docSnap.data().data;
+                    if (savedData) appData = savedData;
+                }
+                refreshAllTables();
+            } catch(e) {
+                console.error("Load error:", e);
+            }
+        }
+
+        // Render Functions
+        function refreshAllTables() {
+            renderSales();
+            renderPurchase();
+            renderCustomers();
+            renderVendors();
+            renderProducts();
+            renderDashboard();
+        }
+
+        function renderSales() {
+            const tbody = document.getElementById('sales-list');
+            if (!appData.sales.length) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No sales found</td></tr>';
+                return;
+            }
+            tbody.innerHTML = appData.sales.map((sale, idx) => {
+                const totals = calculateTotals(sale.items);
+                return `
+                    <tr>
+                        <td>${idx + 1}</td>
+                        <td>${sale.invoiceNo}</td>
+                        <td>${sale.party}</td>
+                        <td>${sale.date}</td>
+                        <td>${formatCurrency(totals.total)}</td>
+                        <td><span class="badge ${sale.status}">${sale.status}</span></td>
+                        <td>
+                            <button class="btn-icon" onclick="viewInvoice('sale', ${idx})">👁️</button>
+                            <button class="btn-icon" onclick="editInvoice('sale', ${idx})">✏️</button>
+                            <button class="btn-icon" onclick="deleteInvoice('sale', ${idx})">🗑️</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderPurchase() {
+            const tbody = document.getElementById('purchase-list');
+            if (!appData.purchases.length) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No purchases found</td></tr>';
+                return;
+            }
+            tbody.innerHTML = appData.purchases.map((purchase, idx) => {
+                const totals = calculateTotals(purchase.items);
+                return `
+                    <tr>
+                        <td>${idx + 1}</td>
+                        <td>${purchase.invoiceNo}</td>
+                        <td>${purchase.party}</td>
+                        <td>${purchase.date}</td>
+                        <td>${formatCurrency(totals.total)}</td>
+                        <td><span class="badge ${purchase.status}">${purchase.status}</span></td>
+                        <td>
+                            <button class="btn-icon" onclick="viewInvoice('purchase', ${idx})">👁️</button>
+                            <button class="btn-icon" onclick="editInvoice('purchase', ${idx})">✏️</button>
+                            <button class="btn-icon" onclick="deleteInvoice('purchase', ${idx})">🗑️</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderCustomers() {
+            const tbody = document.getElementById('customers-list');
+            if (!appData.customers.length) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No customers found</td></tr>';
+                return;
+            }
+            tbody.innerHTML = appData.customers.map(customer => {
+                const customerSales = appData.sales.filter(s => s.party === customer.name);
+                const totalAmount = customerSales.reduce((sum, s) => sum + calculateTotals(s.items).total, 0);
+                return `
+                    <tr>
+                        <td>${customer.name}</td>
+                        <td>${customer.phone || '-'}</td>
+                        <td>${customer.gstin || '-'}</td>
+                        <td>${customerSales.length}</td>
+                        <td>${formatCurrency(totalAmount)}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderVendors() {
+            const tbody = document.getElementById('vendors-list');
+            if (!appData.vendors.length) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No vendors found</td></tr>';
+                return;
+            }
+            tbody.innerHTML = appData.vendors.map(vendor => {
+                const vendorPurchases = appData.purchases.filter(p => p.party === vendor.name);
+                const totalAmount = vendorPurchases.reduce((sum, p) => sum + calculateTotals(p.items).total, 0);
+                return `
+                    <tr>
+                        <td>${vendor.name}</td>
+                        <td>${vendor.phone || '-'}</td>
+                        <td>${vendor.gstin || '-'}</td>
+                        <td>${vendorPurchases.length}</td>
+                        <td>${formatCurrency(totalAmount)}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderProducts() {
+            const tbody = document.getElementById('products-list');
+            if (!appData.products.length) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No products found</td></tr>';
+                return;
+            }
+            tbody.innerHTML = appData.products.map((product, idx) => `
+                <tr>
+                    <td>${product.name}</td>
+                    <td>${product.unit || '-'}</td>
+                    <td>${formatCurrency(product.salePrice)}</td>
+                    <td>${formatCurrency(product.purchasePrice)}</td>
+                    <td>${product.gst || 0}%</td>
+                    <td>${product.stock || 0}</td>
+                    <td>
+                        <button class="btn-icon" onclick="editProduct(${idx})">✏️</button>
+                        <button class="btn-icon" onclick="deleteProduct(${idx})">🗑️</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function renderDashboard() {
+            const totalSales = appData.sales.reduce((sum, s) => sum + calculateTotals(s.items).total, 0);
+            const totalPurchases = appData.purchases.reduce((sum, p) => sum + calculateTotals(p.items).total, 0);
+            const pendingSales = appData.sales.filter(s => s.status === 'pending').reduce((sum, s) => sum + calculateTotals(s.items).total, 0);
+            const paidSales = appData.sales.filter(s => s.status === 'paid').reduce((sum, s) => sum + calculateTotals(s.items).total, 0);
+            
+            document.getElementById('stats-grid').innerHTML = `
+                <div class="stat-card"><h3>Total Sales</h3><div class="value">${formatCurrency(totalSales)}</div></div>
+                <div class="stat-card"><h3>Total Purchases</h3><div class="value">${formatCurrency(totalPurchases)}</div></div>
+                <div class="stat-card"><h3>Received Amount</h3><div class="value">${formatCurrency(paidSales)}</div></div>
+                <div class="stat-card"><h3>Pending Amount</h3><div class="value">${formatCurrency(pendingSales)}</div></div>
+            `;
+            
+            const recentSales = [...appData.sales].reverse().slice(0, 5);
+            document.querySelector('#recent-sales-table tbody').innerHTML = recentSales.map(s => `
+                <tr><td>${s.invoiceNo}</td><td>${s.party}</td><td>${formatCurrency(calculateTotals(s.items).total)}</td><td><span class="badge ${s.status}">${s.status}</span></td></tr>
+            `).join('');
+            
+            const recentPurchases = [...appData.purchases].reverse().slice(0, 5);
+            document.querySelector('#recent-purchases-table tbody').innerHTML = recentPurchases.map(p => `
+                <tr><td>${p.invoiceNo}</td><td>${p.party}</td><td>${formatCurrency(calculateTotals(p.items).total)}</td><td><span class="badge ${p.status}">${p.status}</span></td></tr>
+            `).join('');
+        }
+
+        // Invoice Functions
+        window.openInvoiceModal = function(type, index = -1) {
+            currentInvoiceType = type;
+            editingIndex = index;
+            currentItems = [];
+            
+            const title = type === 'sale' ? 'New Sale Invoice' : 'New Purchase Bill';
+            document.getElementById('invoice-modal-title').innerText = index >= 0 ? 'Edit Invoice' : title;
+            
+            document.getElementById('party-name').value = '';
+            document.getElementById('invoice-number').value = type === 'sale' ? `INV-${appData.sales.length + 1}` : `PUR-${appData.purchases.length + 1}`;
+            document.getElementById('invoice-date').value = new Date().toISOString().split('T')[0];
+            document.getElementById('invoice-status').value = 'pending';
+            
+            if (index >= 0) {
+                const invoice = type === 'sale' ? appData.sales[index] : appData.purchases[index];
+                document.getElementById('party-name').value = invoice.party;
+                document.getElementById('invoice-number').value = invoice.invoiceNo;
+                document.getElementById('invoice-date').value = invoice.date;
+                document.getElementById('invoice-status').value = invoice.status;
+                currentItems = [...invoice.items];
+            }
+            
+            renderItemsList();
+            openModal('invoice-modal');
+        };
+        
+        function renderItemsList() {
+            const tbody = document.getElementById('items-list');
+            if (!currentItems.length) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No items added</td></tr>';
+                updateTotalDisplay();
+                return;
+            }
+            
+            tbody.innerHTML = currentItems.map((item, idx) => {
+                const total = calculateItemTotal(item);
+                return `
+                    <tr>
+                        <td>${item.name}</td>
+                        <td>${item.qty}</td>
+                        <td>${formatCurrency(item.price)}</td>
+                        <td>${item.gst}%</td>
+                        <td>${formatCurrency(total)}</td>
+                        <td><button class="btn-icon" onclick="removeItem(${idx})">❌</button></td>
+                    </tr>
+                `;
+            }).join('');
+            updateTotalDisplay();
+        }
+        
+        function updateTotalDisplay() {
+            const totals = calculateTotals(currentItems);
+            document.getElementById('subtotal').innerText = formatCurrency(totals.subtotal);
+            document.getElementById('gst-total').innerText = formatCurrency(totals.gst);
+            document.getElementById('grand-total').innerText = formatCurrency(totals.total);
+        }
+        
+        window.addItem = function() {
+            const name = document.getElementById('item-name').value.trim();
+            const qty = parseFloat(document.getElementById('item-qty').value);
+            const price = parseFloat(document.getElementById('item-price').value);
+            const gst = parseFloat(document.getElementById('item-gst').value) || 0;
+            
+            if (!name || !qty || !price) {
+                alert('Please fill all item fields');
+                return;
+            }
+            
+            currentItems.push({ name, qty, price, gst });
+            renderItemsList();
+            
+            document.getElementById('item-name').value = '';
+            document.getElementById('item-qty').value = '';
+            document.getElementById('item-price').value = '';
+        };
+        
+        window.removeItem = function(index) {
+            currentItems.splice(index, 1);
+            renderItemsList();
+        };
+        
+        window.saveInvoice = async function() {
+            const party = document.getElementById('party-name').value.trim();
+            const invoiceNo = document.getElementById('invoice-number').value.trim();
+            const date = document.getElementById('invoice-date').value;
+            const status = document.getElementById('invoice-status').value;
+            
+            if (!party) {
+                alert('Please enter party name');
+                return;
+            }
+            if (!currentItems.length) {
+                alert('Please add at least one item');
+                return;
+            }
+            
+            const invoice = {
+                invoiceNo,
+                party,
+                date,
+                status,
+                items: [...currentItems],
+                createdAt: new Date().toISOString()
+            };
+            
+            if (editingIndex >= 0) {
+                if (currentInvoiceType === 'sale') {
+                    appData.sales[editingIndex] = invoice;
+                } else {
+                    appData.purchases[editingIndex] = invoice;
+                }
+            } else {
+                if (currentInvoiceType === 'sale') {
+                    appData.sales.push(invoice);
+                    if (!appData.customers.find(c => c.name === party)) {
+                        appData.customers.push({ name: party, phone: '', gstin: '', address: '' });
+                    }
+                } else {
+                    appData.purchases.push(invoice);
+                    if (!appData.vendors.find(v => v.name === party)) {
+                        appData.vendors.push({ name: party, phone: '', gstin: '', address: '' });
+                    }
+                }
+            }
+            
+            await saveToFirestore();
+            refreshAllTables();
+            closeModal('invoice-modal');
+        };
+        
+        window.viewInvoice = function(type, index) {
+            const invoice = type === 'sale' ? appData.sales[index] : appData.purchases[index];
+            const totals = calculateTotals(invoice.items);
+            alert(`${invoice.invoiceNo}\nParty: ${invoice.party}\nDate: ${invoice.date}\nTotal: ${formatCurrency(totals.total)}\nStatus: ${invoice.status}`);
+        };
+        
+        window.editInvoice = function(type, index) {
+            openInvoiceModal(type, index);
+        };
+        
+        window.deleteInvoice = async function(type, index) {
+            if (!confirm('Are you sure you want to delete this?')) return;
+            if (type === 'sale') {
+                appData.sales.splice(index, 1);
+            } else {
+                appData.purchases.splice(index, 1);
+            }
+            await saveToFirestore();
+            refreshAllTables();
+        };
+        
+        // Party Functions
+        window.openPartyModal = function(type) {
+            currentPartyType = type;
+            document.getElementById('party-modal-title').innerText = type === 'customer' ? 'Add Customer' : 'Add Vendor';
+            document.getElementById('party-add-name').value = '';
+            document.getElementById('party-add-phone').value = '';
+            document.getElementById('party-add-gstin').value = '';
+            document.getElementById('party-add-address').value = '';
+            openModal('party-modal');
+        };
+        
+        window.saveParty = async function() {
+            const name = document.getElementById('party-add-name').value.trim();
+            if (!name) {
+                alert('Please enter name');
+                return;
+            }
+            
+            const party = {
+                name,
+                phone: document.getElementById('party-add-phone').value,
+                gstin: document.getElementById('party-add-gstin').value,
+                address: document.getElementById('party-add-address').value
+            };
+            
+            if (currentPartyType === 'customer') {
+                if (!appData.customers.find(c => c.name === name)) {
+                    appData.customers.push(party);
+                }
+            } else {
+                if (!appData.vendors.find(v => v.name === name)) {
+                    appData.vendors.push(party);
+                }
+            }
+            
+            await saveToFirestore();
+            refreshAllTables();
+            closeModal('party-modal');
+        };
+        
+        // Product Functions
+        window.openProductModal = function(index = -1) {
+            editingIndex = index;
+            if (index >= 0) {
+                const p = appData.products[index];
+                document.getElementById('product-add-name').value = p.name;
+                document.getElementById('product-add-unit').value = p.unit || '';
+                document.getElementById('product-add-sale-price').value = p.salePrice || 0;
+                document.getElementById('product-add-purchase-price').value = p.purchasePrice || 0;
+                document.getElementById('product-add-gst').value = p.gst || 18;
+                document.getElementById('product-add-stock').value = p.stock || 0;
+            } else {
+                document.getElementById('product-add-name').value = '';
+                document.getElementById('product-add-unit').value = '';
+                document.getElementById('product-add-sale-price').value = '';
+                document.getElementById('product-add-purchase-price').value = '';
+                document.getElementById('product-add-gst').value = '18';
+                document.getElementById('product-add-stock').value = '0';
+            }
+            openModal('product-modal');
+        };
+        
+        window.saveProduct = async function() {
+            const name = document.getElementById('product-add-name').value.trim();
+            if (!name) {
+                alert('Please enter product name');
+                return;
+            }
+            
+            const product = {
+                name,
+                unit: document.getElementById('product-add-unit').value,
+                salePrice: parseFloat(document.getElementById('product-add-sale-price').value) || 0,
+                purchasePrice: parseFloat(document.getElementById('product-add-purchase-price').value) || 0,
+                gst: parseFloat(document.getElementById('product-add-gst').value) || 0,
+                stock: parseFloat(document.getElementById('product-add-stock').value) || 0
+            };
+            
+            if (editingIndex >= 0) {
+                appData.products[editingIndex] = product;
+            } else {
+                if (appData.products.find(p => p.name === name)) {
+                    alert('Product already exists');
+                    return;
+                }
+                appData.products.push(product);
+            }
+            
+            await saveToFirestore();
+            refreshAllTables();
+            closeModal('product-modal');
+        };
+        
+        window.editProduct = function(index) {
+            openProductModal(index);
+        };
+        
+        window.deleteProduct = async function(index) {
+            if (!confirm('Delete this product?')) return;
+            appData.products.splice(index, 1);
+            await saveToFirestore();
+            refreshAllTables();
+        };
+        
+        // Filter Functions
+        window.filterSales = function() {
+            const search = document.getElementById('search-sales').value.toLowerCase();
+            const rows = document.querySelectorAll('#sales-list tr');
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(search) ? '' : 'none';
+            });
+        };
+        
+        window.filterPurchase = function() {
+            const search = document.getElementById('search-purchase').value.toLowerCase();
+            const rows = document.querySelectorAll('#purchase-list tr');
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(search) ? '' : 'none';
+            });
+        };
+        
+        window.filterCustomers = function() {
+            const search = document.getElementById('search-customers').value.toLowerCase();
+            const rows = document.querySelectorAll('#customers-list tr');
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(search) ? '' : 'none';
+            });
+        };
+        
+        window.filterVendors = function() {
+            const search = document.getElementById('search-vendors').value.toLowerCase();
+            const rows = document.querySelectorAll('#vendors-list tr');
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(search) ? '' : 'none';
+            });
+        };
+        
+        window.filterProducts = function() {
+            const search = document.getElementById('search-products').value.toLowerCase();
+            const rows = document.querySelectorAll('#products-list tr');
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(search) ? '' : 'none';
+            });
+        };
+        
+        // UI Functions
+        window.showPage = function(page) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.getElementById(`page-${page}`).classList.add('active');
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            event.target.closest('.nav-item').classList.add('active');
+            document.getElementById('page-title').innerText = page.charAt(0).toUpperCase() + page.slice(1);
+        };
+        
+        function openModal(modalId) {
+            document.getElementById(modalId).classList.add('open');
+        }
+        
+        window.closeModal = function(modalId) {
+            document.getElementById(modalId).classList.remove('open');
+        };
+        
+        // Auth Functions
+        let authMode = 'login';
+        
+        function setAuthMode(mode) {
+            authMode = mode;
+            const isLogin = mode === 'login';
+            document.getElementById('auth-title').innerText = isLogin ? 'Welcome Back' : 'Create Account';
+            document.getElementById('auth-subtitle').innerText = isLogin ? 'Login to manage your business' : 'Sign up to start billing';
+            document.getElementById('auth-main-btn').innerText = isLogin ? 'Login' : 'Sign Up';
+            document.getElementById('auth-switch-btn').innerText = isLogin ? 'Create Account' : 'Back to Login';
+        }
+        
+        async function handleAuth() {
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            const messageDiv = document.getElementById('auth-message');
+            
+            if (!email || !password) {
+                messageDiv.innerHTML = '<div class="message error-message">Please fill all fields</div>';
+                return;
+            }
+            
+            messageDiv.innerHTML = '';
+            const btn = document.getElementById('auth-main-btn');
+            btn.disabled = true;
+            btn.innerText = 'Processing...';
+            
+            try {
+                if (authMode === 'login') {
+                    await signInWithEmailAndPassword(auth, email, password);
+                } else {
+                    await createUserWithEmailAndPassword(auth, email, password);
+                }
+            } catch(e) {
+                let errorMsg = e.message;
+                if (e.code === 'auth/user-not-found') errorMsg = 'No account found with this email';
+                else if (e.code === 'auth/wrong-password') errorMsg = 'Wrong password';
+                else if (e.code === 'auth/email-already-in-use') errorMsg = 'Email already exists';
+                else if (e.code === 'auth/weak-password') errorMsg = 'Password should be at least 6 characters';
+                messageDiv.innerHTML = `<div class="message error-message">${errorMsg}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerText = authMode === 'login' ? 'Login' : 'Sign Up';
+            }
+        }
+        
+        async function handleForgotPassword() {
+            const email = document.getElementById('login-email').value;
+            const messageDiv = document.getElementById('auth-message');
+            
+            if (!email) {
+                messageDiv.innerHTML = '<div class="message error-message">Please enter your email address</div>';
+                return;
+            }
+            
+            messageDiv.innerHTML = '';
+            const btn = document.getElementById('forgot-btn');
+            btn.disabled = true;
+            btn.innerText = 'Sending...';
+            
+            try {
+                await sendPasswordResetEmail(auth, email);
+                messageDiv.innerHTML = '<div class="message success-message">✅ Password reset email sent! Check your inbox.</div>';
+                setTimeout(() => {
+                    messageDiv.innerHTML = '';
+                }, 5000);
+            } catch(e) {
+                let errorMsg = e.message;
+                if (e.code === 'auth/user-not-found') errorMsg = 'No account found with this email';
+                messageDiv.innerHTML = `<div class="message error-message">${errorMsg}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Forgot Password?';
+            }
+        }
+        
+        window.logout = async function() {
+            await signOut(auth);
+        };
+        
+        // Auth State Listener
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                currentUser = user;
+                document.body.classList.add('logged-in');
+                document.getElementById('user-email').innerText = user.email;
+                await loadFromFirestore();
+            } else {
+                currentUser = null;
+                document.body.classList.remove('logged-in');
+                setAuthMode('login');
+                document.getElementById('login-email').value = '';
+                document.getElementById('login-password').value = '';
+                document.getElementById('auth-message').innerHTML = '';
+            }
         });
-      } catch(e) {
-        console.error("Save error:", e);
-      }
-    }
-
-    async function loadFromFirestore() {
-      if (!currentUser) return;
-      try {
-        const docRef = doc(db, 'users', currentUser.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const savedData = docSnap.data().data;
-          if (savedData) appData = savedData;
-        }
-        refreshAllTables();
-      } catch(e) {
-        console.error("Load error:", e);
-      }
-    }
-
-    // Render Functions
-    function refreshAllTables() {
-      renderSales();
-      renderPurchase();
-      renderCustomers();
-      renderVendors();
-      renderProducts();
-      renderDashboard();
-    }
-
-    function renderSales() {
-      const tbody = document.getElementById('sales-list');
-      if (!appData.sales.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No sales found</td></tr>';
-        return;
-      }
-      tbody.innerHTML = appData.sales.map((sale, idx) => {
-        const totals = calculateTotals(sale.items);
-        return `
-          <tr>
-            <td>${idx + 1}</td>
-            <td>${sale.invoiceNo}</td>
-            <td>${sale.party}</td>
-            <td>${sale.date}</td>
-            <td>${formatCurrency(totals.total)}</td>
-            <td><span class="badge ${sale.status}">${sale.status}</span></td>
-            <td>
-              <button class="btn" style="padding: 5px 10px;" onclick="viewInvoice('sale', ${idx})">👁️</button>
-              <button class="btn" style="padding: 5px 10px;" onclick="editInvoice('sale', ${idx})">✏️</button>
-              <button class="btn" style="padding: 5px 10px;" onclick="deleteInvoice('sale', ${idx})">🗑️</button>
-            </td>
-          </tr>
-        `;
-      }).join('');
-    }
-
-    function renderPurchase() {
-      const tbody = document.getElementById('purchase-list');
-      if (!appData.purchases.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No purchases found</td></tr>';
-        return;
-      }
-      tbody.innerHTML = appData.purchases.map((purchase, idx) => {
-        const totals = calculateTotals(purchase.items);
-        return `
-          <tr>
-            <td>${idx + 1}</td>
-            <td>${purchase.invoiceNo}</td>
-            <td>${purchase.party}</td>
-            <td>${purchase.date}</td>
-            <td>${formatCurrency(totals.total)}</td>
-            <td><span class="badge ${purchase.status}">${purchase.status}</span></td>
-            <td>
-              <button class="btn" style="padding: 5px 10px;" onclick="viewInvoice('purchase', ${idx})">👁️</button>
-              <button class="btn" style="padding: 5px 10px;" onclick="editInvoice('purchase', ${idx})">✏️</button>
-              <button class="btn" style="padding: 5px 10px;" onclick="deleteInvoice('purchase', ${idx})">🗑️</button>
-            </td>
-          </tr>
-        `;
-      }).join('');
-    }
-
-    function renderCustomers() {
-      const tbody = document.getElementById('customers-list');
-      if (!appData.customers.length) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No customers found</td></tr>';
-        return;
-      }
-      tbody.innerHTML = appData.customers.map(customer => {
-        const customerSales = appData.sales.filter(s => s.party === customer.name);
-        const totalAmount = customerSales.reduce((sum, s) => sum + calculateTotals(s.items).total, 0);
-        return `
-          <tr>
-            <td>${customer.name}</td>
-            <td>${customer.phone || '-'}</td>
-            <td>${customer.gstin || '-'}</td>
-            <td>${customerSales.length}</td>
-            <td>${formatCurrency(totalAmount)}</td>
-          </tr>
-        `;
-      }).join('');
-    }
-
-    function renderVendors() {
-      const tbody = document.getElementById('vendors-list');
-      if (!appData.vendors.length) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No vendors found</td></tr>';
-        return;
-      }
-      tbody.innerHTML = appData.vendors.map(vendor => {
-        const vendorPurchases = appData.purchases.filter(p => p.party === vendor.name);
-        const totalAmount = vendorPurchases.reduce((sum, p) => sum + calculateTotals(p.items).total, 0);
-        return `
-          <tr>
-            <td>${vendor.name}</td>
-            <td>${vendor.phone || '-'}</td>
-            <td>${vendor.gstin || '-'}</td>
-            <td>${vendorPurchases.length}</td>
-            <td>${formatCurrency(totalAmount)}</td>
-          </tr>
-        `;
-      }).join('');
-    }
-
-    function renderProducts() {
-      const tbody = document.getElementById('products-list');
-      if (!appData.products.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No products found</td></tr>';
-        return;
-      }
-      tbody.innerHTML = appData.products.map((product, idx) => `
-        <tr>
-          <td>${product.name}</td>
-          <td>${product.unit || '-'}</td>
-          <td>${formatCurrency(product.salePrice)}</td>
-          <td>${formatCurrency(product.purchasePrice)}</td>
-          <td>${product.gst || 0}%</td>
-          <td>${product.stock || 0}</td>
-          <td>
-            <button class="btn" style="padding: 5px 10px;" onclick="editProduct(${idx})">✏️</button>
-            <button class="btn" style="padding: 5px 10px;" onclick="deleteProduct(${idx})">🗑️</button>
-          </td>
-        </tr>
-      `).join('');
-    }
-
-    function renderDashboard() {
-      const totalSales = appData.sales.reduce((sum, s) => sum + calculateTotals(s.items).total, 0);
-      const totalPurchases = appData.purchases.reduce((sum, p) => sum + calculateTotals(p.items).total, 0);
-      const pendingSales = appData.sales.filter(s => s.status === 'pending').reduce((sum, s) => sum + calculateTotals(s.items).total, 0);
-      const paidSales = appData.sales.filter(s => s.status === 'paid').reduce((sum, s) => sum + calculateTotals(s.items).total, 0);
-      
-      document.getElementById('stats-grid').innerHTML = `
-        <div class="stat-card"><h3>Total Sales</h3><div class="value">${formatCurrency(totalSales)}</div></div>
-        <div class="stat-card"><h3>Total Purchases</h3><div class="value">${formatCurrency(totalPurchases)}</div></div>
-        <div class="stat-card"><h3>Received Amount</h3><div class="value">${formatCurrency(paidSales)}</div></div>
-        <div class="stat-card"><h3>Pending Amount</h3><div class="value">${formatCurrency(pendingSales)}</div></div>
-      `;
-      
-      const recentSales = [...appData.sales].reverse().slice(0, 5);
-      document.querySelector('#recent-sales-table tbody').innerHTML = recentSales.map(s => `
-        <tr><td>${s.invoiceNo}</td><td>${s.party}</td><td>${formatCurrency(calculateTotals(s.items).total)}</td><td><span class="badge ${s.status}">${s.status}</span></td></tr>
-      `).join('');
-      
-      const recentPurchases = [...appData.purchases].reverse().slice(0, 5);
-      document.querySelector('#recent-purchases-table tbody').innerHTML = recentPurchases.map(p => `
-        <tr><td>${p.invoiceNo}</td><td>${p.party}</td><td>${formatCurrency(calculateTotals(p.items).total)}</td><td><span class="badge ${p.status}">${p.status}</span></td></tr>
-      `).join('');
-    }
-
-    // Invoice Functions
-    window.openInvoiceModal = function(type, index = -1) {
-      currentInvoiceType = type;
-      editingIndex = index;
-      currentItems = [];
-      
-      const title = type === 'sale' ? 'New Sale Invoice' : 'New Purchase Bill';
-      document.getElementById('invoice-modal-title').innerText = index >= 0 ? 'Edit Invoice' : title;
-      
-      document.getElementById('party-name').value = '';
-      document.getElementById('invoice-number').value = type === 'sale' ? `INV-${appData.sales.length + 1}` : `PUR-${appData.purchases.length + 1}`;
-      document.getElementById('invoice-date').value = new Date().toISOString().split('T')[0];
-      document.getElementById('invoice-status').value = 'pending';
-      
-      if (index >= 0) {
-        const invoice = type === 'sale' ? appData.sales[index] : appData.purchases[index];
-        document.getElementById('party-name').value = invoice.party;
-        document.getElementById('invoice-number').value = invoice.invoiceNo;
-        document.getElementById('invoice-date').value = invoice.date;
-        document.getElementById('invoice-status').value = invoice.status;
-        currentItems = [...invoice.items];
-      }
-      
-      renderItemsList();
-      openModal('invoice-modal');
-    };
-    
-    function renderItemsList() {
-      const tbody = document.getElementById('items-list');
-      if (!currentItems.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No items added</td></tr>';
-        updateTotalDisplay();
-        return;
-      }
-      
-      tbody.innerHTML = currentItems.map((item, idx) => {
-        const total = calculateItemTotal(item);
-        return `
-          <tr>
-            <td>${item.name}</td>
-            <td>${item.qty}</td>
-            <td>${formatCurrency(item.price)}</td>
-            <td>${item.gst}%</td>
-            <td>${formatCurrency(total)}</td>
-            <td><button class="btn" style="padding: 2px 8px;" onclick="removeItem(${idx})">❌</button></td>
-          </tr>
-        `;
-      }).join('');
-      updateTotalDisplay();
-    }
-    
-    function updateTotalDisplay() {
-      const totals = calculateTotals(currentItems);
-      document.getElementById('subtotal').innerText = formatCurrency(totals.subtotal);
-      document.getElementById('gst-total').innerText = formatCurrency(totals.gst);
-      document.getElementById('grand-total').innerText = formatCurrency(totals.total);
-    }
-    
-    window.addItem = function() {
-      const name = document.getElementById('item-name').value.trim();
-      const qty = parseFloat(document.getElementById('item-qty').value);
-      const price = parseFloat(document.getElementById('item-price').value);
-      const gst = parseFloat(document.getElementById('item-gst').value) || 0;
-      
-      if (!name || !qty || !price) {
-        alert('Please fill all item fields');
-        return;
-      }
-      
-      currentItems.push({ name, qty, price, gst });
-      renderItemsList();
-      
-      document.getElementById('item-name').value = '';
-      document.getElementById('item-qty').value = '';
-      document.getElementById('item-price').value = '';
-    };
-    
-    window.removeItem = function(index) {
-      currentItems.splice(index, 1);
-      renderItemsList();
-    };
-    
-    window.saveInvoice = async function() {
-      const party = document.getElementById('party-name').value.trim();
-      const invoiceNo = document.getElementById('invoice-number').value.trim();
-      const date = document.getElementById('invoice-date').value;
-      const status = document.getElementById('invoice-status').value;
-      
-      if (!party) {
-        alert('Please enter party name');
-        return;
-      }
-      if (!currentItems.length) {
-        alert('Please add at least one item');
-        return;
-      }
-      
-      const invoice = {
-        invoiceNo,
-        party,
-        date,
-        status,
-        items: [...currentItems],
-        createdAt: new Date().toISOString()
-      };
-      
-      if (editingIndex >= 0) {
-        if (currentInvoiceType === 'sale') {
-          appData.sales[editingIndex] = invoice;
-        } else {
-          appData.purchases[editingIndex] = invoice;
-        }
-      } else {
-        if (currentInvoiceType === 'sale') {
-          appData.sales.push(invoice);
-          if (!appData.customers.find(c => c.name === party)) {
-            appData.customers.push({ name: party, phone: '', gstin: '', address: '' });
-          }
-        } else {
-          appData.purchases.push(invoice);
-          if (!appData.vendors.find(v => v.name === party)) {
-            appData.vendors.push({ name: party, phone: '', gstin: '', address: '' });
-          }
-        }
-      }
-      
-      await saveToFirestore();
-      refreshAllTables();
-      closeModal('invoice-modal');
-    };
-    
-    window.viewInvoice = function(type, index) {
-      const invoice = type === 'sale' ? appData.sales[index] : appData.purchases[index];
-      const totals = calculateTotals(invoice.items);
-      
-      let itemsHtml = '';
-      invoice.items.forEach((item, i) => {
-        const total = calculateItemTotal(item);
-        itemsHtml += `<tr><td>${i+1}</td><td>${item.name}</td><td>${item.qty}</td><td>${formatCurrency(item.price)}</td><td>${item.gst}%</td><td>${formatCurrency(total)}</td></tr>`;
-      });
-      
-      alert(`${invoice.invoiceNo}\nParty: ${invoice.party}\nDate: ${invoice.date}\nTotal: ${formatCurrency(totals.total)}\nStatus: ${invoice.status}`);
-    };
-    
-    window.editInvoice = function(type, index) {
-      openInvoiceModal(type, index);
-    };
-    
-    window.deleteInvoice = async function(type, index) {
-      if (!confirm('Are you sure you want to delete this?')) return;
-      if (type === 'sale') {
-        appData.sales.splice(index, 1);
-      } else {
-        appData.purchases.splice(index, 1);
-      }
-      await saveToFirestore();
-      refreshAllTables();
-    };
-    
-    // Party Functions
-    window.openPartyModal = function(type) {
-      currentPartyType = type;
-      document.getElementById('party-modal-title').innerText = type === 'customer' ? 'Add Customer' : 'Add Vendor';
-      document.getElementById('party-add-name').value = '';
-      document.getElementById('party-add-phone').value = '';
-      document.getElementById('party-add-gstin').value = '';
-      document.getElementById('party-add-address').value = '';
-      openModal('party-modal');
-    };
-    
-    window.saveParty = async function() {
-      const name = document.getElementById('party-add-name').value.trim();
-      if (!name) {
-        alert('Please enter name');
-        return;
-      }
-      
-      const party = {
-        name,
-        phone: document.getElementById('party-add-phone').value,
-        gstin: document.getElementById('party-add-gstin').value,
-        address: document.getElementById('party-add-address').value
-      };
-      
-      if (currentPartyType === 'customer') {
-        if (!appData.customers.find(c => c.name === name)) {
-          appData.customers.push(party);
-        }
-      } else {
-        if (!appData.vendors.find(v => v.name === name)) {
-          appData.vendors.push(party);
-        }
-      }
-      
-      await saveToFirestore();
-      refreshAllTables();
-      closeModal('party-modal');
-    };
-    
-    // Product Functions
-    window.openProductModal = function(index = -1) {
-      editingIndex = index;
-      if (index >= 0) {
-        const p = appData.products[index];
-        document.getElementById('product-add-name').value = p.name;
-        document.getElementById('product-add-unit').value = p.unit || '';
-        document.getElementById('product-add-sale-price').value = p.salePrice || 0;
-        document.getElementById('product-add-purchase-price').value = p.purchasePrice || 0;
-        document.getElementById('product-add-gst').value = p.gst || 18;
-        document.getElementById('product-add-stock').value = p.stock || 0;
-      } else {
-        document.getElementById('product-add-name').value = '';
-        document.getElementById('product-add-unit').value = '';
-        document.getElementById('product-add-sale-price').value = '';
-        document.getElementById('product-add-purchase-price').value = '';
-        document.getElementById('product-add-gst').value = '18';
-        document.getElementById('product-add-stock').value = '0';
-      }
-      openModal('product-modal');
-    };
-    
-    window.saveProduct = async function() {
-      const name = document.getElementById('product-add-name').value.trim();
-      if (!name) {
-        alert('Please enter product name');
-        return;
-      }
-      
-      const product = {
-        name,
-        unit: document.getElementById('product-add-unit').value,
-        salePrice: parseFloat(document.getElementById('product-add-sale-price').value) || 0,
-        purchasePrice: parseFloat(document.getElementById('product-add-purchase-price').value) || 0,
-        gst: parseFloat(document.getElementById('product-add-gst').value) || 0,
-        stock: parseFloat(document.getElementById('product-add-stock').value) || 0
-      };
-      
-      if (editingIndex >= 0) {
-        appData.products[editingIndex] = product;
-      } else {
-        if (appData.products.find(p => p.name === name)) {
-          alert('Product already exists');
-          return;
-        }
-        appData.products.push(product);
-      }
-      
-      await saveToFirestore();
-      refreshAllTables();
-      closeModal('product-modal');
-    };
-    
-    window.editProduct = function(index) {
-      openProductModal(index);
-    };
-    
-    window.deleteProduct = async function(index) {
-      if (!confirm('Delete this product?')) return;
-      appData.products.splice(index, 1);
-      await saveToFirestore();
-      refreshAllTables();
-    };
-    
-    // Filter Functions
-    window.filterSales = function() {
-      const search = document.getElementById('search-sales').value.toLowerCase();
-      const rows = document.querySelectorAll('#sales-list tr');
-      rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(search) ? '' : 'none';
-      });
-    };
-    
-    window.filterPurchase = function() {
-      const search = document.getElementById('search-purchase').value.toLowerCase();
-      const rows = document.querySelectorAll('#purchase-list tr');
-      rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(search) ? '' : 'none';
-      });
-    };
-    
-    window.filterCustomers = function() {
-      const search = document.getElementById('search-customers').value.toLowerCase();
-      const rows = document.querySelectorAll('#customers-list tr');
-      rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(search) ? '' : 'none';
-      });
-    };
-    
-    window.filterVendors = function() {
-      const search = document.getElementById('search-vendors').value.toLowerCase();
-      const rows = document.querySelectorAll('#vendors-list tr');
-      rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(search) ? '' : 'none';
-      });
-    };
-    
-    window.filterProducts = function() {
-      const search = document.getElementById('search-products').value.toLowerCase();
-      const rows = document.querySelectorAll('#products-list tr');
-      rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(search) ? '' : 'none';
-      });
-    };
-    
-    // UI Functions
-    window.showPage = function(page) {
-      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-      document.getElementById(`page-${page}`).classList.add('active');
-      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-      event.target.closest('.nav-item').classList.add('active');
-      document.getElementById('page-title').innerText = page.charAt(0).toUpperCase() + page.slice(1);
-    };
-    
-    function openModal(modalId) {
-      document.getElementById(modalId).classList.add('open');
-    }
-    
-    window.closeModal = function(modalId) {
-      document.getElementById(modalId).classList.remove('open');
-    };
-    
-    // Auth Functions
-    let authMode = 'login';
-    
-    function setAuthMode(mode) {
-      authMode = mode;
-      const isLogin = mode === 'login';
-      document.getElementById('auth-title').innerText = isLogin ? 'Welcome Back' : 'Create Account';
-      document.getElementById('auth-subtitle').innerText = isLogin ? 'Login to manage your business' : 'Sign up to start billing';
-      document.getElementById('auth-main-btn').innerText = isLogin ? 'Login' : 'Sign Up';
-      document.getElementById('auth-switch-btn').innerText = isLogin ? 'Create Account' : 'Back to Login';
-    }
-    
-    async function handleAuth() {
-      const email = document.getElementById('login-email').value;
-      const password = document.getElementById('login-password').value;
-      const messageDiv = document.getElementById('auth-message');
-      
-      if (!email || !password) {
-        messageDiv.innerHTML = '<div class="error-message">Please fill all fields</div>';
-        return;
-      }
-      
-      messageDiv.innerHTML = '';
-      const btn = document.getElementById('auth-main-btn');
-      btn.disabled = true;
-      btn.innerText = 'Processing...';
-      
-      try {
-        if (authMode === 'login') {
-          await signInWithEmailAndPassword(auth, email, password);
-        } else {
-          await createUserWithEmailAndPassword(auth, email, password);
-        }
-      } catch(e) {
-        let errorMsg = e.message;
-        if (e.code === 'auth/user-not-found') errorMsg = 'No account found with this email';
-        else if (e.code === 'auth/wrong-password') errorMsg = 'Wrong password';
-        else if (e.code === 'auth/email-already-in-use') errorMsg = 'Email already exists';
-        else if (e.code === 'auth/weak-password') errorMsg = 'Password should be at least 6 characters';
-        messageDiv.innerHTML = `<div class="error-message">${errorMsg}</div>`;
-      } finally {
-        btn.disabled = false;
-        btn.innerText = authMode === 'login' ? 'Login' : 'Sign Up';
-      }
-    }
-    
-    async function handleForgotPassword() {
-      const email = document.getElementById('login-email').value;
-      const messageDiv = document.getElementById('auth-message');
-      
-      if (!email) {
-        messageDiv.innerHTML = '<div class="error-message">Please enter your email address</div>';
-        return;
-      }
-      
-      messageDiv.innerHTML = '';
-      const btn = document.getElementById('forgot-btn');
-      btn.disabled = true;
-      btn.innerText = 'Sending...';
-      
-      try {
-        await sendPasswordResetEmail(auth, email);
-        messageDiv.innerHTML = '<div class="success-message">✅ Password reset email sent! Check your inbox.</div>';
-        setTimeout(() => {
-          messageDiv.innerHTML = '';
-        }, 5000);
-      } catch(e) {
-        let errorMsg = e.message;
-        if (e.code === 'auth/user-not-found') errorMsg = 'No account found with this email';
-        messageDiv.innerHTML = `<div class="error-message">${errorMsg}</div>`;
-      } finally {
-        btn.disabled = false;
-        btn.innerText = 'Forgot Password?';
-      }
-    }
-    
-    window.logout = async function() {
-      await signOut(auth);
-    };
-    
-    // Auth State Listener
-    onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        currentUser = user;
-        document.body.classList.remove('auth-locked');
-        document.getElementById('user-email-display').innerText = user.email;
-        await loadFromFirestore();
-      } else {
-        currentUser = null;
-        document.body.classList.add('auth-locked');
-        setAuthMode('login');
-        document.getElementById('login-email').value = '';
-        document.getElementById('login-password').value = '';
-        document.getElementById('auth-message').innerHTML = '';
-      }
-    });
-    
-    // Event Listeners
-    document.getElementById('auth-main-btn').onclick = handleAuth;
-    document.getElementById('auth-switch-btn').onclick = () => setAuthMode(authMode === 'login' ? 'signup' : 'login');
-    document.getElementById('forgot-btn').onclick = handleForgotPassword;
-  </script>
+        
+        // Event Listeners
+        document.getElementById('auth-main-btn').onclick = handleAuth;
+        document.getElementById('auth-switch-btn').onclick = () => setAuthMode(authMode === 'login' ? 'signup' : 'login');
+        document.getElementById('forgot-btn').onclick = handleForgotPassword;
+    </script>
 </body>
 </html>
