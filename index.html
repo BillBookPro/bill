@@ -1365,18 +1365,11 @@
     let activeInvoice = null;
 
     const defaultStore = {
-      sales: [
-        { invoiceNo: 'INV-001', party: 'Rahul Enterprises', phone: '9876543210', date: '2026-06-01', due: '2026-06-15', items: [{ name: 'Laptop', qty: 2, unit: 'pcs', price: 45000, gst: 18 }], status: 'paid', notes: '' },
-        { invoiceNo: 'INV-002', party: 'Sharma Traders', phone: '9123456789', date: '2026-06-03', due: '2026-06-20', items: [{ name: 'Mobile', qty: 5, unit: 'pcs', price: 12000, gst: 18 }, { name: 'Charger', qty: 5, unit: 'pcs', price: 800, gst: 12 }], status: 'pending', notes: '' },
-        { invoiceNo: 'INV-003', party: 'Meena Store', phone: '9988776655', date: '2026-06-05', due: '2026-06-25', items: [{ name: 'Headphones', qty: 3, unit: 'pcs', price: 2500, gst: 18 }], status: 'pending', notes: '' }
-      ],
-      purchases: [
-        { invoiceNo: 'PUR-001', party: 'Tech Distributors', phone: '9012345678', date: '2026-06-02', due: '2026-06-16', items: [{ name: 'Laptop Stock', qty: 10, unit: 'pcs', price: 38000, gst: 18 }], status: 'paid', notes: '' },
-        { invoiceNo: 'PUR-002', party: 'Mobile World', phone: '9911002233', date: '2026-06-04', due: '2026-06-18', items: [{ name: 'Phones', qty: 20, unit: 'pcs', price: 9500, gst: 18 }], status: 'pending', notes: '' }
-      ],
+      sales: [],
+      purchases: [],
       customers: [],
       vendors: [],
-      products: [],
+      products: []
     };
 
     let store = structuredClone(defaultStore);
