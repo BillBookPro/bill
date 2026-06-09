@@ -3,9 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BillPro</title>
+  <title>BillPro - Business Billing Software</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <style>
     :root {
       --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -401,27 +400,6 @@
     .form-group { display: flex; flex-direction: column; gap: 6px; }
     .form-group label { font-size: 12px; color: var(--muted); font-weight: 720; }
 
-    .items-title {
-      margin: 2px 0 9px;
-      font-size: 13px;
-      font-weight: 780;
-      color: var(--text);
-    }
-    .items-table { min-width: 620px; }
-    .items-table th { padding: 9px 10px; }
-    .items-table td { padding: 8px 10px; }
-    .items-table input {
-      width: 100%;
-      min-height: 34px;
-      border: 1px solid transparent;
-      background: #f8fafc;
-      border-radius: 6px;
-      color: var(--text);
-      padding: 7px 8px;
-      outline: none;
-    }
-    .items-table input:focus { border-color: var(--blue); background: #fff; box-shadow: 0 0 0 3px rgba(22, 99, 166, .1); }
-
     .total-section {
       margin-top: 14px;
       border: 1px solid var(--line-soft);
@@ -460,34 +438,6 @@
       padding: 30px 16px;
       color: var(--muted);
       font-size: 13px;
-    }
-
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
-      margin-bottom: 14px;
-    }
-
-    .mini-stat {
-      border: 1px solid var(--line-soft);
-      border-radius: var(--radius);
-      background: #fbfcfd;
-      padding: 12px;
-    }
-
-    .mini-stat span {
-      display: block;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-      margin-bottom: 6px;
-    }
-
-    .mini-stat strong {
-      display: block;
-      color: var(--text);
-      font-size: 18px;
     }
 
     .invoice-paper {
@@ -621,16 +571,6 @@
       padding: 18px 26px 24px;
     }
 
-    .invoice-type-bar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      color: #5b6472;
-      font-size: 15px;
-      font-weight: 750;
-      margin-bottom: 14px;
-    }
-
     .invoice-top-grid {
       display: grid;
       grid-template-columns: minmax(320px, 1fr) minmax(520px, 2fr);
@@ -674,61 +614,12 @@
       gap: 12px;
     }
 
-    .invoice-fields .form-group label {
-      font-size: 16px;
-      color: #5f6671;
-      margin-bottom: 4px;
-    }
-
-    .custom-chips {
-      margin: 18px 0 26px;
-    }
-
-    .custom-chips h3,
-    .product-area-head h3 {
-      font-size: 18px;
-      color: #5b6472;
-      margin-bottom: 10px;
-    }
-
-    .chip-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      min-height: 30px;
-      padding: 5px 11px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-      color: #2f3640;
-      font-weight: 650;
-    }
-
-    .chip i {
-      color: #315dff;
-      font-size: 16px;
-    }
-
     .product-area-head {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 14px;
       margin-bottom: 12px;
-    }
-
-    .product-tools {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      color: #5b6472;
-      font-weight: 650;
     }
 
     .product-entry {
@@ -766,54 +657,34 @@
       background: #fff;
     }
 
+    .items-table { width: 100%; border-collapse: collapse; }
+    .items-table th, .items-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+    .items-table input { width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; }
+
     @media print {
       body * { visibility: hidden; }
       #print-area, #print-area * { visibility: visible; }
-      #print-area {
-        position: absolute;
-        inset: 0;
-        padding: 0;
-      }
+      #print-area { position: absolute; inset: 0; padding: 20px; }
       .modal-footer, .modal-head .btn { display: none !important; }
-      .modal, .invoice-paper {
-        width: 100%;
-        max-height: none;
-        overflow: visible;
-        border: 0;
-        box-shadow: none;
-      }
     }
 
     @media (max-width: 980px) {
       .app { grid-template-columns: 1fr; }
-      .sidebar {
-        position: static;
-        height: auto;
-        border-right: 0;
-        border-bottom: 1px solid var(--line);
-      }
+      .sidebar { position: static; height: auto; }
       .brand { padding: 16px; }
       .nav { display: flex; gap: 8px; overflow-x: auto; padding: 10px 12px; }
       .nav-section { display: none; }
-      .nav-item { width: auto; flex: 0 0 auto; }
+      .nav-item { width: auto; }
       .dashboard-grid, .split-grid { grid-template-columns: 1fr 1fr; }
       .invoice-top-grid, .invoice-fields, .quick-add-row { grid-template-columns: 1fr; }
       .content { padding: 18px; }
     }
 
     @media (max-width: 680px) {
-      .topbar { align-items: flex-start; padding: 14px 16px; }
-      .topbar h1 { font-size: 19px; }
-      .create-invoice-head { grid-template-columns: 1fr; }
-      .bill-number { grid-template-columns: 1fr 1fr; min-width: 0; }
-      .invoice-create-body { padding: 14px; }
-      .toolbar { align-items: stretch; flex-direction: column; }
-      .toolbar .btn { width: 100%; }
       .dashboard-grid, .split-grid, .form-row { grid-template-columns: 1fr; }
-      .summary-grid, .invoice-party, .invoice-head { grid-template-columns: 1fr; }
-      .invoice-head, .invoice-meta { text-align: left; }
-      .modal-footer { flex-direction: column-reverse; }
-      .modal-footer .btn { width: 100%; }
+      .topbar { flex-direction: column; gap: 10px; align-items: flex-start; }
+      .create-invoice-head { grid-template-columns: 1fr; }
+      .bill-number { grid-template-columns: 1fr 1fr; min-width: auto; }
     }
   </style>
 </head>
@@ -822,17 +693,24 @@
     <div class="auth-card">
       <div class="logo"><span class="logo-mark"><i class="ti ti-receipt-2"></i></span>Bill<span>Pro</span></div>
       <h1 id="auth-title">Login</h1>
-      <p id="auth-copy">Apna username aur password daal kar billing app open karein.</p>
-      <div class="form-group"><label>Email ID</label><input type="email" id="auth-user" autocomplete="username" placeholder="name@example.com"></div>
-      
-      <div class="form-group"><label>Password</label><input type="password" id="auth-pass" autocomplete="current-password" placeholder="Password"></div>
-      <div class="form-group" id="auth-otp-row" style="display:none"><label>OTP</label><input type="text" id="auth-otp" inputmode="numeric" placeholder="6 digit OTP"></div>
-      <div class="auth-actions">
-        <button class="btn primary" id="auth-main-btn" onclick="login()">Login</button>
-        <button class="btn" id="auth-switch-btn" onclick="setAuthMode('signup')">Create ID</button>
+      <p id="auth-copy">Login to manage your business billing</p>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="auth-user" placeholder="your@email.com">
       </div>
-      <button class="link-btn" id="forgot-btn" style="margin-top:12px" onclick="setAuthMode('forgot')">Forgot password?</button>
-      <div class="auth-hint">Firebase ke saath kisi bhi browser mein login hoga. Password bhulne par OTP ya reset link milega.</div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="auth-pass" placeholder="••••••••">
+      </div>
+      <div id="auth-error" style="color: var(--red); font-size: 13px; margin-top: 8px;"></div>
+      <div class="auth-actions">
+        <button class="btn primary" id="auth-main-btn">Login</button>
+        <button class="btn" id="auth-switch-btn">Create Account</button>
+      </div>
+      <button class="link-btn" id="forgot-btn" style="margin-top: 12px; width: 100%;">Forgot Password?</button>
+      <div class="auth-hint">
+        🔐 Secure cloud storage | Your data is safe with Firebase
+      </div>
     </div>
   </section>
 
@@ -840,19 +718,31 @@
     <aside class="sidebar">
       <div class="brand">
         <div class="logo"><span class="logo-mark"><i class="ti ti-receipt-2"></i></span>Bill<span>Pro</span></div>
-        <small>Sales, purchase aur party records</small>
+        <small>Complete Billing Solution</small>
       </div>
-      <nav class="nav" aria-label="Main navigation">
-        <div class="nav-section">Overview</div>
-        <button class="nav-item active" onclick="showPage('dashboard',this)"><i class="ti ti-layout-dashboard" aria-hidden="true"></i>Dashboard</button>
+      <nav class="nav">
+        <div class="nav-section">Main</div>
+        <button class="nav-item active" onclick="showPage('dashboard', this)">
+          <i class="ti ti-layout-dashboard"></i> Dashboard
+        </button>
         <div class="nav-section">Sales</div>
-        <button class="nav-item" onclick="showPage('sales',this)"><i class="ti ti-file-invoice" aria-hidden="true"></i>Sale Invoice</button>
-        <button class="nav-item" onclick="showPage('customers',this)"><i class="ti ti-users" aria-hidden="true"></i>Customers</button>
-        <div class="nav-section">Inventory</div>
-        <button class="nav-item" onclick="showPage('products',this)"><i class="ti ti-box" aria-hidden="true"></i>Products</button>
+        <button class="nav-item" onclick="showPage('sales', this)">
+          <i class="ti ti-file-invoice"></i> Sale Invoice
+        </button>
+        <button class="nav-item" onclick="showPage('customers', this)">
+          <i class="ti ti-users"></i> Customers
+        </button>
         <div class="nav-section">Purchase</div>
-        <button class="nav-item" onclick="showPage('purchase',this)"><i class="ti ti-shopping-cart" aria-hidden="true"></i>Purchase Bill</button>
-        <button class="nav-item" onclick="showPage('vendors',this)"><i class="ti ti-building-store" aria-hidden="true"></i>Vendors</button>
+        <button class="nav-item" onclick="showPage('purchase', this)">
+          <i class="ti ti-shopping-cart"></i> Purchase Bill
+        </button>
+        <button class="nav-item" onclick="showPage('vendors', this)">
+          <i class="ti ti-building-store"></i> Vendors
+        </button>
+        <div class="nav-section">Inventory</div>
+        <button class="nav-item" onclick="showPage('products', this)">
+          <i class="ti ti-box"></i> Products
+        </button>
       </nav>
     </aside>
 
@@ -860,230 +750,302 @@
       <header class="topbar">
         <div>
           <h1 id="page-title">Dashboard</h1>
-          <p id="page-subtitle">Business ka quick snapshot</p>
+          <p id="page-subtitle">Business Overview</p>
         </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <span class="user-pill"><i class="ti ti-user-circle"></i><span id="current-user-label"></span></span>
-          <button class="btn sm" onclick="logout()"><i class="ti ti-logout"></i>Logout</button>
+        <div style="display: flex; gap: 12px; align-items: center;">
+          <span class="user-pill"><i class="ti ti-user-circle"></i> <span id="user-email"></span></span>
+          <button class="btn sm" onclick="logout()"><i class="ti ti-logout"></i> Logout</button>
         </div>
       </header>
 
       <section class="content">
-        <div class="page active" id="page-dashboard">
-          <div class="dashboard-grid" id="dash-stats"></div>
+        <div id="page-dashboard" class="page active">
+          <div class="dashboard-grid" id="dashboard-stats"></div>
           <div class="split-grid">
             <div class="card">
-              <div class="card-header"><div><span class="card-title">Recent Sales</span><span class="card-subtitle">Last 3 invoices</span></div></div>
-              <div class="table-wrap"><table id="dash-sales-table"><thead><tr><th>Party</th><th>Amount</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+              <div class="card-header">Recent Sales</div>
+              <div class="table-wrap">
+                <table id="recent-sales">
+                  <thead><tr><th>Invoice No</th><th>Customer</th><th>Amount</th><th>Status</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
             </div>
             <div class="card">
-              <div class="card-header"><div><span class="card-title">Recent Purchases</span><span class="card-subtitle">Last 3 bills</span></div></div>
-              <div class="table-wrap"><table id="dash-purchase-table"><thead><tr><th>Vendor</th><th>Amount</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+              <div class="card-header">Recent Purchases</div>
+              <div class="table-wrap">
+                <table id="recent-purchases">
+                  <thead><tr><th>Bill No</th><th>Vendor</th><th>Amount</th><th>Status</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="page" id="page-sales">
+        <div id="page-sales" class="page">
           <div class="toolbar">
-            <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search invoices..." oninput="filterTable('sales-table',this.value)"></div>
-            <button class="btn primary" onclick="openModal('sale')"><i class="ti ti-plus" aria-hidden="true"></i>New Sale Invoice</button>
+            <div class="search-wrap">
+              <i class="ti ti-search"></i>
+              <input type="text" placeholder="Search invoices..." id="search-sales" onkeyup="filterTable('sales-table', this.value)">
+            </div>
+            <button class="btn primary" onclick="openInvoiceModal('sale')">
+              <i class="ti ti-plus"></i> New Sale Invoice
+            </button>
           </div>
-          <div class="card"><div class="table-wrap"><table id="sales-table"><thead><tr><th>#</th><th>Invoice No</th><th>Party Name</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead><tbody id="sales-tbody"></tbody></table></div></div>
+          <div class="card">
+            <div class="table-wrap">
+              <table id="sales-table">
+                <thead><tr><th>#</th><th>Invoice No</th><th>Customer</th><th>Date</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead>
+                <tbody id="sales-list"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
-        <div class="page" id="page-purchase">
+        <div id="page-purchase" class="page">
           <div class="toolbar">
-            <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search bills..." oninput="filterTable('purchase-table',this.value)"></div>
-            <button class="btn primary" onclick="openModal('purchase')"><i class="ti ti-plus" aria-hidden="true"></i>New Purchase Bill</button>
+            <div class="search-wrap">
+              <i class="ti ti-search"></i>
+              <input type="text" placeholder="Search bills..." id="search-purchases" onkeyup="filterTable('purchase-table', this.value)">
+            </div>
+            <button class="btn primary" onclick="openInvoiceModal('purchase')">
+              <i class="ti ti-plus"></i> New Purchase Bill
+            </button>
           </div>
-          <div class="card"><div class="table-wrap"><table id="purchase-table"><thead><tr><th>#</th><th>Bill No</th><th>Vendor Name</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead><tbody id="purchase-tbody"></tbody></table></div></div>
+          <div class="card">
+            <div class="table-wrap">
+              <table id="purchase-table">
+                <thead><tr><th>#</th><th>Bill No</th><th>Vendor</th><th>Date</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead>
+                <tbody id="purchase-list"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
-        <div class="page" id="page-customers">
+        <div id="page-customers" class="page">
           <div class="toolbar">
-            <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search customers..." oninput="filterTable('customers-table',this.value)"></div>
-            <button class="btn primary" onclick="openPartyModal('customer')"><i class="ti ti-plus" aria-hidden="true"></i>Add Customer</button>
+            <div class="search-wrap">
+              <i class="ti ti-search"></i>
+              <input type="text" placeholder="Search customers..." onkeyup="filterTable('customers-table', this.value)">
+            </div>
+            <button class="btn primary" onclick="openPartyModal('customer')">
+              <i class="ti ti-plus"></i> Add Customer
+            </button>
           </div>
-          <div class="card"><div class="table-wrap"><table id="customers-table"><thead><tr><th>#</th><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Amount</th><th>Actions</th></tr></thead><tbody id="customers-tbody"></tbody></table></div></div>
+          <div class="card">
+            <div class="table-wrap">
+              <table id="customers-table">
+                <thead><tr><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Total Amount</th></tr></thead>
+                <tbody id="customers-list"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
-        <div class="page" id="page-products">
+        <div id="page-vendors" class="page">
           <div class="toolbar">
-            <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search products..." oninput="filterTable('products-table',this.value)"></div>
-            <button class="btn primary" onclick="openProductModal()"><i class="ti ti-plus" aria-hidden="true"></i>Add Product</button>
+            <div class="search-wrap">
+              <i class="ti ti-search"></i>
+              <input type="text" placeholder="Search vendors..." onkeyup="filterTable('vendors-table', this.value)">
+            </div>
+            <button class="btn primary" onclick="openPartyModal('vendor')">
+              <i class="ti ti-plus"></i> Add Vendor
+            </button>
           </div>
-          <div class="card"><div class="table-wrap"><table id="products-table"><thead><tr><th>#</th><th>Product</th><th>Unit</th><th>Sale Price</th><th>Purchase Price</th><th>GST</th><th>Stock</th><th>Actions</th></tr></thead><tbody id="products-tbody"></tbody></table></div></div>
+          <div class="card">
+            <div class="table-wrap">
+              <table id="vendors-table">
+                <thead><tr><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Total Amount</th></tr></thead>
+                <tbody id="vendors-list"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
-        <div class="page" id="page-vendors">
+        <div id="page-products" class="page">
           <div class="toolbar">
-            <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search vendors..." oninput="filterTable('vendors-table',this.value)"></div>
-            <button class="btn primary" onclick="openPartyModal('vendor')"><i class="ti ti-plus" aria-hidden="true"></i>Add Vendor</button>
+            <div class="search-wrap">
+              <i class="ti ti-search"></i>
+              <input type="text" placeholder="Search products..." onkeyup="filterTable('products-table', this.value)">
+            </div>
+            <button class="btn primary" onclick="openProductModal()">
+              <i class="ti ti-plus"></i> Add Product
+            </button>
           </div>
-          <div class="card"><div class="table-wrap"><table id="vendors-table"><thead><tr><th>#</th><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Amount</th></tr></thead><tbody id="vendors-tbody"></tbody></table></div></div>
+          <div class="card">
+            <div class="table-wrap">
+              <table id="products-table">
+                <thead><tr><th>Name</th><th>Unit</th><th>Sale Price</th><th>Purchase Price</th><th>GST%</th><th>Stock</th><th>Actions</th></tr></thead>
+                <tbody id="products-list"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </section>
     </main>
   </div>
 
-  <div class="modal-bg" id="invoice-modal">
+  <!-- Invoice Modal -->
+  <div id="invoice-modal" class="modal-bg">
     <div class="modal invoice-modal-shell">
       <div class="create-invoice-head">
         <div class="create-title">
-          <button class="back-btn" title="Close" onclick="closeModal()"><i class="ti ti-chevron-left"></i></button>
+          <button class="back-btn" onclick="closeInvoiceModal()"><i class="ti ti-x"></i></button>
           <div>
-            <h2 id="modal-title">Create Invoice</h2>
-            <small>Addixon</small>
+            <h2 id="invoice-modal-title">Create Invoice</h2>
+            <small>Fill details below</small>
           </div>
         </div>
-        <div style="display:flex;align-items:center;gap:18px">
+        <div style="display: flex; gap: 12px;">
           <div class="bill-number">
-            <input type="text" id="f-bill-prefix" value="INV-" aria-label="Invoice prefix">
-            <input type="text" id="f-billno" placeholder="2" aria-label="Invoice number">
+            <input type="text" id="invoice-prefix" placeholder="Prefix" value="INV-">
+            <input type="text" id="invoice-number" placeholder="Number">
           </div>
-          <button class="btn primary invoice-save-top" onclick="saveEntry()">Save <i class="ti ti-arrow-right" aria-hidden="true"></i></button>
+          <button class="btn primary invoice-save-top" onclick="saveInvoice()">Save</button>
         </div>
       </div>
       <div class="invoice-create-body">
-        <div class="invoice-type-bar">
-          <div>Type&nbsp;&nbsp; <span style="color:#23272f">Regular <i class="ti ti-chevron-down"></i></span></div>
-          <div><i class="ti ti-settings"></i> Settings</div>
-        </div>
-
         <div class="invoice-top-grid">
           <div class="soft-panel">
             <div class="panel-label-row">
-              <label id="party-label" for="f-party">Select Customer</label>
-              <button class="link-btn" onclick="openPartyModal('customer')">+ Create Customer</button>
+              <label id="party-label">Select Party</label>
+              <button class="link-btn" onclick="openPartyModal(currentInvoiceType === 'sale' ? 'customer' : 'vendor')">+ New</button>
             </div>
-            <input type="text" id="f-party" list="party-list" placeholder="Search customers by name, company, GSTIN, tags...">
+            <input type="text" id="party-name" list="party-list" placeholder="Type to search...">
             <datalist id="party-list"></datalist>
-            <input type="hidden" id="f-phone">
           </div>
-
           <div class="soft-panel neutral">
             <div class="invoice-fields">
-              <div class="form-group"><label>Invoice Date</label><input type="date" id="f-date"></div>
-              <div class="form-group"><label>Due Date <i class="ti ti-help-circle"></i></label><input type="date" id="f-due"></div>
-              <div class="form-group"><label>Reference <i class="ti ti-help-circle"></i></label><input type="text" id="f-notes" placeholder="Reference, e.g. PO Number, Sales Person names, Shipment Number etc... (Optional)"></div>
+              <div class="form-group">
+                <label>Date</label>
+                <input type="date" id="invoice-date">
+              </div>
+              <div class="form-group">
+                <label>Due Date</label>
+                <input type="date" id="due-date">
+              </div>
+              <div class="form-group">
+                <label>Notes</label>
+                <input type="text" id="invoice-notes" placeholder="Optional notes">
+              </div>
             </div>
-          </div>
-        </div>
-
-        <div class="custom-chips">
-          <h3>Custom Headers</h3>
-          <div class="chip-list">
-            <span class="chip"><i class="ti ti-plus"></i>Vehicle No</span>
-            <span class="chip"><i class="ti ti-plus"></i>PO Number</span>
-            <span class="chip"><i class="ti ti-plus"></i>Challan No.</span>
-            <span class="chip"><i class="ti ti-plus"></i>Delivery Date</span>
-            <span class="chip"><i class="ti ti-plus"></i>Sales Person</span>
-            <span class="chip"><i class="ti ti-plus"></i>Dispatch Number</span>
           </div>
         </div>
 
         <div class="product-area-head">
-          <h3>Products & Services <i class="ti ti-help-circle"></i> <button class="link-btn" onclick="openProductModal()"><i class="ti ti-circle-plus"></i> Add new Product?</button></h3>
-          <div class="product-tools"><span><i class="ti ti-checkbox"></i> Show description</span><i class="ti ti-adjustments-horizontal"></i></div>
+          <h3>Items</h3>
+          <div class="product-tools">
+            <button class="link-btn" onclick="openProductModal()">+ Add Product</button>
+          </div>
         </div>
 
-        <datalist id="product-list"></datalist>
         <div class="product-entry">
           <div class="quick-add-row">
-            <input type="text" placeholder="Filter Category">
-            <input type="text" list="product-list" id="quick-product" placeholder="Search or scan barcode for existing products">
-            <input type="number" id="quick-qty" min="1" value="1" placeholder="Qty">
-            <button class="btn primary" onclick="addQuickProduct()"><i class="ti ti-plus" aria-hidden="true"></i>Add to Bill</button>
+            <input type="text" list="product-search-list" id="quick-product" placeholder="Search product...">
+            <input type="number" id="quick-qty" placeholder="Qty" value="1">
+            <button class="btn primary" onclick="addQuickItem()">Add Item</button>
           </div>
-          <div class="table-wrap"><table class="items-table"><thead><tr><th style="width:35%">Product Name</th><th style="width:12%">Quantity</th><th style="width:15%">Unit</th><th style="width:18%">Unit Price</th><th style="width:15%">GST%</th><th></th></tr></thead><tbody id="items-body"></tbody></table></div>
-          <button class="btn sm" onclick="addItemRow()"><i class="ti ti-plus" aria-hidden="true"></i>Add Custom Item</button>
+          <div class="table-wrap">
+            <table class="items-table">
+              <thead>
+                <tr><th>Product</th><th>Qty</th><th>Unit</th><th>Price</th><th>GST%</th><th>Total</th><th></th></tr>
+              </thead>
+              <tbody id="items-list"></tbody>
+            </table>
+          </div>
         </div>
 
-        <div class="total-section" id="totals-section">
-          <div class="total-row"><span>Subtotal</span><span id="t-sub">₹0</span></div>
-          <div class="total-row"><span>GST</span><span id="t-gst">₹0</span></div>
-          <div class="total-row grand"><span>Total</span><span id="t-total">₹0</span></div>
+        <div class="total-section">
+          <div class="total-row"><span>Subtotal:</span><span id="subtotal">₹0</span></div>
+          <div class="total-row"><span>GST:</span><span id="total-gst">₹0</span></div>
+          <div class="total-row grand"><span>Grand Total:</span><span id="grand-total">₹0</span></div>
         </div>
 
-        <div class="form-row" style="margin-top:18px">
-          <div class="form-group"><label>Payment Status</label><select id="f-status"><option value="pending">Pending</option><option value="paid">Paid</option><option value="cancelled">Cancelled</option></select></div>
-          <div></div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Payment Status</label>
+            <select id="payment-status">
+              <option value="pending">Pending</option>
+              <option value="paid">Paid</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="modal-bg" id="party-modal">
-    <div class="modal" style="width:440px">
-      <div class="modal-head"><h2 id="party-modal-title">Add Customer</h2><button class="btn sm icon" title="Close" onclick="closePartyModal()"><i class="ti ti-x"></i></button></div>
+  <!-- Party Modal -->
+  <div id="party-modal" class="modal-bg">
+    <div class="modal" style="width: 450px;">
+      <div class="modal-head">
+        <h2 id="party-modal-title">Add Customer</h2>
+        <button class="btn icon" onclick="closePartyModal()"><i class="ti ti-x"></i></button>
+      </div>
       <div class="modal-body">
-        <div class="form-group" style="margin-bottom:12px"><label>Name</label><input type="text" id="p-name" placeholder="Full name / company"></div>
-        <div class="form-group" style="margin-bottom:12px"><label>Phone</label><input type="text" id="p-phone" placeholder="Mobile number"></div>
-        <div class="form-group" style="margin-bottom:12px"><label>GSTIN</label><input type="text" id="p-gstin" placeholder="15-digit GSTIN (optional)"></div>
-        <div class="form-group"><label>Address</label><input type="text" id="p-address" placeholder="City, State"></div>
+        <div class="form-group"><label>Name *</label><input type="text" id="party-name-input"></div>
+        <div class="form-group"><label>Phone</label><input type="text" id="party-phone"></div>
+        <div class="form-group"><label>GSTIN</label><input type="text" id="party-gstin"></div>
+        <div class="form-group"><label>Address</label><input type="text" id="party-address"></div>
       </div>
-      <div class="modal-footer"><button class="btn" onclick="closePartyModal()">Cancel</button><button class="btn primary" onclick="saveParty()"><i class="ti ti-device-floppy" aria-hidden="true"></i>Save</button></div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closePartyModal()">Cancel</button>
+        <button class="btn primary" onclick="saveParty()">Save</button>
+      </div>
     </div>
   </div>
 
-  <div class="modal-bg" id="product-modal">
-    <div class="modal" style="width:560px">
-      <div class="modal-head"><h2 id="product-modal-title">Add Product</h2><button class="btn sm icon" title="Close" onclick="closeProductModal()"><i class="ti ti-x"></i></button></div>
+  <!-- Product Modal -->
+  <div id="product-modal" class="modal-bg">
+    <div class="modal" style="width: 550px;">
+      <div class="modal-head">
+        <h2>Add Product</h2>
+        <button class="btn icon" onclick="closeProductModal()"><i class="ti ti-x"></i></button>
+      </div>
       <div class="modal-body">
         <div class="form-row">
-          <div class="form-group"><label>Product Name</label><input type="text" id="pr-name" placeholder="Product / service name"></div>
-          <div class="form-group"><label>Unit</label><input type="text" id="pr-unit" placeholder="pcs, kg, box"></div>
+          <div class="form-group"><label>Product Name *</label><input type="text" id="product-name"></div>
+          <div class="form-group"><label>Unit</label><input type="text" id="product-unit" placeholder="pcs, kg, box"></div>
         </div>
         <div class="form-row">
-          <div class="form-group"><label>Sale Price</label><input type="number" id="pr-sale" min="0" placeholder="0"></div>
-          <div class="form-group"><label>Purchase Price</label><input type="number" id="pr-purchase" min="0" placeholder="0"></div>
+          <div class="form-group"><label>Sale Price</label><input type="number" id="product-sale-price"></div>
+          <div class="form-group"><label>Purchase Price</label><input type="number" id="product-purchase-price"></div>
         </div>
-        <div class="form-row" style="margin-bottom:0">
-          <div class="form-group"><label>GST %</label><input type="number" id="pr-gst" min="0" max="100" placeholder="18"></div>
-          <div class="form-group"><label>Opening Stock</label><input type="number" id="pr-stock" min="0" placeholder="0"></div>
+        <div class="form-row">
+          <div class="form-group"><label>GST %</label><input type="number" id="product-gst" value="18"></div>
+          <div class="form-group"><label>Stock</label><input type="number" id="product-stock" value="0"></div>
         </div>
       </div>
-      <div class="modal-footer"><button class="btn" onclick="closeProductModal()">Cancel</button><button class="btn primary" onclick="saveProduct()"><i class="ti ti-device-floppy" aria-hidden="true"></i>Save</button></div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeProductModal()">Cancel</button>
+        <button class="btn primary" onclick="saveProduct()">Save</button>
+      </div>
     </div>
   </div>
 
-  <div class="modal-bg" id="customer-ledger-modal">
-    <div class="modal" style="width:920px">
-      <div class="modal-head"><h2 id="ledger-title">Customer Record</h2><button class="btn sm icon" title="Close" onclick="closeCustomerLedger()"><i class="ti ti-x"></i></button></div>
-      <div class="modal-body">
-        <div class="form-row">
-          <div class="form-group"><label>Month</label><input type="month" id="ledger-month" onchange="renderCustomerLedger()"></div>
-          <div class="form-group"><label>Year</label><select id="ledger-year" onchange="renderCustomerLedger()"></select></div>
-        </div>
-        <div class="summary-grid" id="ledger-summary"></div>
-        <div class="card">
-          <div class="table-wrap"><table id="ledger-table"><thead><tr><th>#</th><th>Invoice No</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead><tbody id="ledger-tbody"></tbody></table></div>
-        </div>
+  <!-- Invoice View Modal -->
+  <div id="view-modal" class="modal-bg">
+    <div class="modal" style="width: 800px;">
+      <div class="modal-head">
+        <h2>Invoice Details</h2>
+        <button class="btn icon" onclick="closeViewModal()"><i class="ti ti-x"></i></button>
       </div>
-      <div class="modal-footer"><button class="btn" onclick="clearLedgerFilter()">All Records</button><button class="btn" onclick="closeCustomerLedger()">Close</button></div>
-    </div>
-  </div>
-
-  <div class="modal-bg" id="invoice-view-modal">
-    <div class="modal" style="width:820px">
-      <div class="modal-head"><h2>Invoice View</h2><button class="btn sm icon" title="Close" onclick="closeInvoiceView()"><i class="ti ti-x"></i></button></div>
       <div class="modal-body" id="print-area">
-        <div class="invoice-paper" id="invoice-preview"></div>
+        <div id="invoice-view-content"></div>
       </div>
-      <div class="modal-footer"><button class="btn" onclick="closeInvoiceView()">Close</button><button class="btn primary" onclick="printInvoice()"><i class="ti ti-printer" aria-hidden="true"></i>Print</button></div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeViewModal()">Close</button>
+        <button class="btn primary" onclick="printInvoice()">Print</button>
+      </div>
     </div>
   </div>
 
-  <!-- ======================================================
-       FIREBASE CONFIG — Yahan apni Firebase project ki values daalen
-       Firebase Console: https://console.firebase.google.com
-       Steps: Project Settings > Your Apps > Web App > Config
-  ======================================================= -->
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-    import {
-      getAuth,
-      createUserWithEmailAndPassword,
+    import { 
+      getAuth, 
+      createUserWithEmailAndPassword, 
       signInWithEmailAndPassword,
       sendPasswordResetEmail,
       onAuthStateChanged,
@@ -1094,748 +1056,746 @@
       doc,
       setDoc,
       getDoc,
+      collection,
+      query,
+      getDocs,
       enableIndexedDbPersistence
     } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
-    // =====================================================
-    // STEP 1: Yahan APNI Firebase config paste karein
-    // =====================================================
+    // Firebase Config
     const firebaseConfig = {
-      apiKey:            "AIzaSyBy8UEKBowJP1Vp4QHO4asjPxmgq_UfODM",
-      authDomain:        "bill-book-pro-93155.firebaseapp.com",
-      projectId:         "bill-book-pro-93155",
-      storageBucket:     "bill-book-pro-93155.firebasestorage.app",
+      apiKey: "AIzaSyBy8UEKBowJP1Vp4QHO4asjPxmgq_UfODM",
+      authDomain: "bill-book-pro-93155.firebaseapp.com",
+      projectId: "bill-book-pro-93155",
+      storageBucket: "bill-book-pro-93155.firebasestorage.app",
       messagingSenderId: "409759386921",
-      appId:             "1:409759386921:web:d557714d258ba865a67b38"
+      appId: "1:409759386921:web:d557714d258ba865a67b38"
     };
 
-    const app  = initializeApp(firebaseConfig);
+    const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    const db   = getFirestore(app);
+    const db = getFirestore(app);
+    
+    try { enableIndexedDbPersistence(db); } catch(e) { console.log("Offline persistence not enabled"); }
 
-    // Offline support
-    try { enableIndexedDbPersistence(db); } catch(e) {}
-
-    // =====================================================
-    // STEP 2: EmailJS config — OTP ke liye
-    // =====================================================
-    const EMAILJS_PUBLIC_KEY  = 'PASTE_EMAILJS_PUBLIC_KEY';
-    const EMAILJS_SERVICE_ID  = 'PASTE_EMAILJS_SERVICE_ID';
-    const EMAILJS_TEMPLATE_ID = 'PASTE_EMAILJS_TEMPLATE_ID';
-
-    // =====================================================
-    // OTP state
-    // =====================================================
-    let resetOtp = null;
-    let resetOtpEmail = null;
-    let resetOtpExpiresAt = 0;
-
-    function isEmailJsConfigured() {
-      return ![EMAILJS_PUBLIC_KEY, EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID]
-        .some(v => String(v).startsWith('PASTE_'));
-    }
-
-    // =====================================================
-    // Auth UI helpers
-    // =====================================================
-    let authMode = 'login';
-
-    window.setAuthMode = function(mode) {
-      authMode = mode;
-      const isSignup = mode === 'signup';
-      const isForgot = mode === 'forgot';
-      resetOtp = null; resetOtpEmail = null; resetOtpExpiresAt = 0;
-      document.getElementById('auth-title').textContent =
-        isForgot ? 'Password Reset' : (isSignup ? 'Create Account' : 'Login');
-      document.getElementById('auth-copy').textContent =
-        isForgot ? 'Email daalein — reset link bhej denge (EmailJS configured ho to OTP bhi).'
-        : (isSignup ? 'Email aur password daalkar naya account banayein.'
-        : 'Email aur password se login karein. Kisi bhi browser mein kaam karega.');
-      document.getElementById('auth-main-btn').textContent =
-        isForgot ? 'Reset Password' : (isSignup ? 'Create Account' : 'Login');
-      document.getElementById('auth-main-btn').onclick =
-        isForgot ? sendReset : (isSignup ? createAccount : login);
-      document.getElementById('auth-switch-btn').textContent =
-        (isSignup || isForgot) ? 'Back to Login' : 'Create Account';
-      document.getElementById('auth-switch-btn').onclick =
-        (isSignup || isForgot) ? () => setAuthMode('login') : () => setAuthMode('signup');
-      document.getElementById('forgot-btn').style.display = isForgot ? 'none' : 'inline-flex';
-      document.getElementById('auth-email-row').style.display = 'flex';
-      document.getElementById('auth-otp-row').style.display = 'none';
-      document.getElementById('auth-otp').value = '';
-      document.getElementById('auth-user').placeholder = 'name@example.com';
-    };
-
-    function showAuthError(msg) {
-      let el = document.getElementById('auth-error-msg');
-      if (!el) {
-        el = document.createElement('p');
-        el.id = 'auth-error-msg';
-        el.style.cssText = 'color:#c43d3d;font-size:13px;margin-top:8px;';
-        document.querySelector('.auth-actions').after(el);
-      }
-      el.textContent = msg;
-    }
-
-    function clearAuthError() {
-      const el = document.getElementById('auth-error-msg');
-      if (el) el.textContent = '';
-    }
-
-    function getEmailPw() {
-      const email = document.getElementById('auth-user').value.trim().toLowerCase();
-      const pass  = document.getElementById('auth-pass').value;
-      return { email, pass };
-    }
-
-    // =====================================================
-    // Firebase: Create Account
-    // =====================================================
-    async function createAccount() {
-      clearAuthError();
-      const { email, pass } = getEmailPw();
-      if (!email || !pass) { showAuthError('Email aur password daalein'); return; }
-      if (pass.length < 6) { showAuthError('Password kam se kam 6 characters ka hona chahiye'); return; }
-      const btn = document.getElementById('auth-main-btn');
-      btn.textContent = 'Creating...'; btn.disabled = true;
-      try {
-        await createUserWithEmailAndPassword(auth, email, pass);
-        // Firestore mein user data initialize karein
-        await setDoc(doc(db, 'users', auth.currentUser.uid, 'meta', 'info'), {
-          email, createdAt: new Date().toISOString()
-        }, { merge: true });
-      } catch(e) {
-        btn.textContent = 'Create Account'; btn.disabled = false;
-        if (e.code === 'auth/email-already-in-use') showAuthError('Ye email pehle se registered hai. Login karein.');
-        else if (e.code === 'auth/invalid-email') showAuthError('Email format sahi nahi hai');
-        else showAuthError('Error: ' + e.message);
-      }
-    }
-
-    // =====================================================
-    // Firebase: Login
-    // =====================================================
-    async function login() {
-      clearAuthError();
-      const { email, pass } = getEmailPw();
-      if (!email || !pass) { showAuthError('Email aur password daalein'); return; }
-      const btn = document.getElementById('auth-main-btn');
-      btn.textContent = 'Logging in...'; btn.disabled = true;
-      try {
-        await signInWithEmailAndPassword(auth, email, pass);
-      } catch(e) {
-        btn.textContent = 'Login'; btn.disabled = false;
-        if (e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential')
-          showAuthError('Email ya password galat hai');
-        else if (e.code === 'auth/too-many-requests')
-          showAuthError('Zyada attempts. Thodi der baad try karein.');
-        else showAuthError('Error: ' + e.message);
-      }
-    }
-
-    // =====================================================
-    // Firebase: Reset Password (email link)
-    // OTP via EmailJS (agar configured ho)
-    // =====================================================
-    async function sendReset() {
-      clearAuthError();
-      const email = document.getElementById('auth-user').value.trim().toLowerCase();
-      if (!email) { showAuthError('Email daalein'); return; }
-      const btn = document.getElementById('auth-main-btn');
-      btn.textContent = 'Bhej raha hoon...'; btn.disabled = true;
-
-      if (isEmailJsConfigured()) {
-        // EmailJS OTP flow
-        resetOtp = String(Math.floor(100000 + Math.random() * 900000));
-        resetOtpEmail = email;
-        resetOtpExpiresAt = Date.now() + 10 * 60 * 1000;
-        try {
-          emailjs.init({ publicKey: Ew1DjkFfQtrDnzmFY });
-          await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-            to_email: email, to_name: email.split('@')[0], otp: resetOtp, app_name: 'BillPro'
-          });
-          document.getElementById('auth-copy').textContent =
-            `OTP ${email} par bhej diya. OTP enter karein aur naya password daalein.`;
-          document.getElementById('auth-otp-row').style.display = 'flex';
-          document.getElementById('auth-pass').placeholder = 'Naya password';
-          document.getElementById('auth-pass').value = '';
-          btn.textContent = 'Password Reset Karein';
-          btn.disabled = false;
-          btn.onclick = verifyOtpAndReset;
-        } catch(e) {
-          btn.textContent = 'Reset Password'; btn.disabled = false;
-          showAuthError('OTP send nahi hua. EmailJS check karein.');
-        }
-      } else {
-        // Firebase email link fallback
-        try {
-          await sendPasswordResetEmail(auth, email);
-          document.getElementById('auth-copy').textContent =
-            `Reset link ${email} par bhej diya gaya. Email check karein.`;
-          btn.textContent = 'Bhej diya ✓'; btn.disabled = true;
-        } catch(e) {
-          btn.textContent = 'Reset Password'; btn.disabled = false;
-          if (e.code === 'auth/user-not-found') showAuthError('Ye email registered nahi hai');
-          else showAuthError('Error: ' + e.message);
-        }
-      }
-    }
-
-    async function verifyOtpAndReset() {
-      clearAuthError();
-      const otp  = document.getElementById('auth-otp').value.trim();
-      const pass = document.getElementById('auth-pass').value;
-      const email = document.getElementById('auth-user').value.trim().toLowerCase();
-      if (!otp || !pass) { showAuthError('OTP aur naya password daalein'); return; }
-      if (otp !== resetOtp || email !== resetOtpEmail || Date.now() > resetOtpExpiresAt) {
-        showAuthError('OTP galat hai ya expire ho gaya'); return;
-      }
-      // Firebase me password reset ke liye user ko re-auth karna padega
-      // Isliye hum Firebase ka email reset bhej dete hain
-      try {
-        await sendPasswordResetEmail(auth, email);
-        showAuthError('');
-        document.getElementById('auth-copy').textContent =
-          'OTP sahi tha! Ab email check karein — Firebase reset link bhej diya gaya.';
-        document.getElementById('auth-otp-row').style.display = 'none';
-        document.getElementById('auth-main-btn').textContent = 'Reset Bhej Diya ✓';
-        document.getElementById('auth-main-btn').disabled = true;
-      } catch(e) { showAuthError('Error: ' + e.message); }
-    }
-
-    // =====================================================
-    // Firebase: Logout
-    // =====================================================
-    window.logout = async function() {
-      await signOut(auth);
-    };
-
-    // =====================================================
-    // Firestore: Data load/save per user
-    // =====================================================
-    async function loadUserData(uid) {
-      try {
-        const snap = await getDoc(doc(db, 'users', uid, 'data', 'store'));
-        if (snap.exists()) return snap.data();
-      } catch(e) { console.warn('Firestore load error', e); }
-      return null;
-    }
-
-    window._saveDataToFirestore = async function(uid, dataObj) {
-      try {
-        await setDoc(doc(db, 'users', uid, 'data', 'store'), dataObj, { merge: false });
-      } catch(e) { console.warn('Firestore save error', e); }
-    };
-
-    // =====================================================
-    // Auth state listener — main entry point
-    // =====================================================
-    onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        document.body.classList.remove('auth-locked');
-        document.getElementById('current-user-label').textContent = user.email;
-        window._currentUid = user.uid;
-        // Firestore se data load karein
-        const saved = await loadUserData(user.uid);
-        window._initAppWithData(saved);
-      } else {
-        document.body.classList.add('auth-locked');
-        window._currentUid = null;
-        setAuthMode('login');
-      }
-    });
-
-    // Auth screen mein Login ID label ko Email karo
-    document.addEventListener('DOMContentLoaded', () => {
-      const lbl = document.querySelector('label[for="auth-user"], .auth-card .form-group label');
-      if (lbl && lbl.nextElementSibling && lbl.nextElementSibling.id === 'auth-user') {
-        lbl.textContent = 'Email';
-      }
-      document.getElementById('auth-user').type = 'email';
-      document.getElementById('auth-email-row').style.display = 'none'; // Email field separate nahi chahiye
-    });
-  </script>
-  <script>
-    let currentType = 'sale';
-    let currentPartyType = 'customer';
-    let editIndex = -1;
-    let editPartyIndex = -1;
-    let editProductIndex = -1;
-    let activeLedgerCustomer = '';
-    let activeInvoice = null;
-
-    const defaultStore = {
+    // Global state
+    let currentUser = null;
+    let appData = {
       sales: [],
       purchases: [],
       customers: [],
       vendors: [],
       products: []
     };
+    let currentInvoiceType = 'sale';
+    let editingInvoiceIndex = -1;
+    let currentPartyType = 'customer';
+    let currentItems = [];
 
-    let store = structuredClone(defaultStore);
-    let invoiceCounters = { sale: 4, purchase: 3 };
+    // Helper functions
+    function formatCurrency(amount) {
+      return '₹' + Math.round(amount || 0).toLocaleString('en-IN');
+    }
 
-    // Called by Firebase auth listener after login
-    window._initAppWithData = function(savedData) {
-      if (savedData && savedData.sales) {
-        store = {
-          sales:     Array.isArray(savedData.sales)     ? savedData.sales     : structuredClone(defaultStore.sales),
-          purchases: Array.isArray(savedData.purchases) ? savedData.purchases : structuredClone(defaultStore.purchases),
-          customers: Array.isArray(savedData.customers) ? savedData.customers : structuredClone(defaultStore.customers),
-          vendors:   Array.isArray(savedData.vendors)   ? savedData.vendors   : structuredClone(defaultStore.vendors),
-          products:  Array.isArray(savedData.products)  ? savedData.products  : structuredClone(defaultStore.products)
-        };
-      } else {
-        store = structuredClone(defaultStore);
-      }
-      invoiceCounters = savedData?.invoiceCounters || {
-        sale: getNextCounter('INV-', store.sales),
-        purchase: getNextCounter('PUR-', store.purchases)
-      };
-      updateProductList();
-      renderDashboard();
-    };
+    function calculateItemTotal(item) {
+      const subtotal = (item.qty || 0) * (item.price || 0);
+      const gstAmount = subtotal * (item.gst || 0) / 100;
+      return subtotal + gstAmount;
+    }
 
-    function getNextCounter(prefix, rows) {
-      const numbers = rows.map(row => {
-        const match = String(row.invoiceNo || '').match(new RegExp('^' + prefix + '0*(\\d+)$'));
-        return match ? Number(match[1]) : 0;
+    function calculateTotals(items) {
+      let subtotal = 0, gst = 0;
+      items.forEach(item => {
+        const sub = (item.qty || 0) * (item.price || 0);
+        subtotal += sub;
+        gst += sub * (item.gst || 0) / 100;
       });
-      return Math.max(0, ...numbers) + 1;
+      return { subtotal, gst, total: subtotal + gst };
     }
 
-    function saveData() {
-      const uid = window._currentUid;
-      if (!uid) return;
-      const dataObj = { ...store, invoiceCounters };
-      window._saveDataToFirestore(uid, dataObj);
+    function updateInvoiceTotals() {
+      const totals = calculateTotals(currentItems);
+      document.getElementById('subtotal').innerText = formatCurrency(totals.subtotal);
+      document.getElementById('total-gst').innerText = formatCurrency(totals.gst);
+      document.getElementById('grand-total').innerText = formatCurrency(totals.total);
     }
 
-    function calcItem(i) {
-      const qty = parseFloat(i.qty) || 0;
-      const price = parseFloat(i.price) || 0;
-      const gst = parseFloat(i.gst) || 0;
-      const sub = qty * price;
-      return { sub, tax: sub * gst / 100, total: sub * (1 + gst / 100) };
-    }
-    function calcTotals(items) {
-      let s = 0, g = 0;
-      items.forEach(i => { const c = calcItem(i); s += c.sub; g += c.tax; });
-      return { sub: s, gst: g, total: s + g };
-    }
-    function fmt(n) { return '₹' + Math.round(n).toLocaleString('en-IN'); }
-    function esc(v) {
-      return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
-    }
-    function niceDate(date) {
-      if (!date) return '-';
-      return new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    function renderItemsTable() {
+      const tbody = document.getElementById('items-list');
+      if (!currentItems.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No items added</td></tr>';
+        updateInvoiceTotals();
+        return;
+      }
+      
+      tbody.innerHTML = currentItems.map((item, idx) => {
+        const total = calculateItemTotal(item);
+        return `
+          <tr>
+            <td>${escapeHtml(item.name)}</td>
+            <td><input type="number" value="${item.qty}" style="width: 70px;" onchange="updateItem(${idx}, 'qty', this.value)"></td>
+            <td>${escapeHtml(item.unit)}</td>
+            <td><input type="number" value="${item.price}" style="width: 100px;" onchange="updateItem(${idx}, 'price', this.value)"></td>
+            <td><input type="number" value="${item.gst}" style="width: 70px;" onchange="updateItem(${idx}, 'gst', this.value)"></td>
+            <td>${formatCurrency(total)}</td>
+            <td><button class="btn sm danger" onclick="removeItem(${idx})"><i class="ti ti-trash"></i></button></td>
+          </tr>
+        `;
+      }).join('');
+      updateInvoiceTotals();
     }
 
-    function showPage(id, el) {
-      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-      document.getElementById('page-' + id).classList.add('active');
-      el.classList.add('active');
-      const titles = { dashboard: 'Dashboard', sales: 'Sale Invoices', purchase: 'Purchase Bills', customers: 'Customers', products: 'Products', vendors: 'Vendors' };
-      const subtitles = { dashboard: 'Business ka quick snapshot', sales: 'Customer invoices manage karein', purchase: 'Vendor bills track karein', customers: 'Customer directory', products: 'Product master aur rate list', vendors: 'Vendor directory' };
-      document.getElementById('page-title').textContent = titles[id];
-      document.getElementById('page-subtitle').textContent = subtitles[id];
-      if (id === 'dashboard') renderDashboard();
-      if (id === 'sales') renderTable('sales');
-      if (id === 'purchase') renderTable('purchase');
-      if (id === 'customers') renderParties('customers');
-      if (id === 'products') renderProducts();
-      if (id === 'vendors') renderParties('vendors');
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+      });
+    }
+
+    // Save data to Firestore
+    async function saveDataToFirestore() {
+      if (!currentUser) return;
+      try {
+        await setDoc(doc(db, 'users', currentUser.uid), {
+          data: appData,
+          updatedAt: new Date().toISOString()
+        });
+      } catch(e) {
+        console.error("Error saving data:", e);
+      }
+    }
+
+    // Load data from Firestore
+    async function loadDataFromFirestore() {
+      if (!currentUser) return;
+      try {
+        const docRef = doc(db, 'users', currentUser.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          appData = docSnap.data().data || appData;
+        }
+        renderAllTables();
+      } catch(e) {
+        console.error("Error loading data:", e);
+      }
+    }
+
+    // Render functions
+    function renderAllTables() {
+      renderSalesTable();
+      renderPurchaseTable();
+      renderCustomersTable();
+      renderVendorsTable();
+      renderProductsTable();
+      renderDashboard();
+      updatePartyDatalist();
+      updateProductDatalist();
+    }
+
+    function renderSalesTable() {
+      const tbody = document.getElementById('sales-list');
+      if (!appData.sales.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No sales invoices found</td></tr>';
+        return;
+      }
+      tbody.innerHTML = appData.sales.map((sale, idx) => {
+        const totals = calculateTotals(sale.items);
+        return `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>${escapeHtml(sale.invoiceNo)}</td>
+            <td>${escapeHtml(sale.party)}</td>
+            <td>${sale.date}</td>
+            <td>${formatCurrency(totals.total)}</td>
+            <td><span class="badge ${sale.status}">${sale.status}</span></td>
+            <td>
+              <button class="btn sm" onclick="viewInvoice('sales', ${idx})"><i class="ti ti-eye"></i></button>
+              <button class="btn sm" onclick="editInvoice('sales', ${idx})"><i class="ti ti-edit"></i></button>
+              <button class="btn sm danger" onclick="deleteInvoice('sales', ${idx})"><i class="ti ti-trash"></i></button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderPurchaseTable() {
+      const tbody = document.getElementById('purchase-list');
+      if (!appData.purchases.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No purchase bills found</td></tr>';
+        return;
+      }
+      tbody.innerHTML = appData.purchases.map((purchase, idx) => {
+        const totals = calculateTotals(purchase.items);
+        return `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>${escapeHtml(purchase.invoiceNo)}</td>
+            <td>${escapeHtml(purchase.party)}</td>
+            <td>${purchase.date}</td>
+            <td>${formatCurrency(totals.total)}</td>
+            <td><span class="badge ${purchase.status}">${purchase.status}</span></td>
+            <td>
+              <button class="btn sm" onclick="viewInvoice('purchases', ${idx})"><i class="ti ti-eye"></i></button>
+              <button class="btn sm" onclick="editInvoice('purchases', ${idx})"><i class="ti ti-edit"></i></button>
+              <button class="btn sm danger" onclick="deleteInvoice('purchases', ${idx})"><i class="ti ti-trash"></i></button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderCustomersTable() {
+      const tbody = document.getElementById('customers-list');
+      if (!appData.customers.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No customers found</td></tr>';
+        return;
+      }
+      tbody.innerHTML = appData.customers.map(customer => {
+        const customerSales = appData.sales.filter(s => s.party === customer.name);
+        const totalAmount = customerSales.reduce((sum, sale) => sum + calculateTotals(sale.items).total, 0);
+        return `
+          <tr>
+            <td>${escapeHtml(customer.name)}</td>
+            <td>${escapeHtml(customer.phone || '-')}</td>
+            <td>${escapeHtml(customer.gstin || '-')}</td>
+            <td>${customerSales.length}</td>
+            <td>${formatCurrency(totalAmount)}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderVendorsTable() {
+      const tbody = document.getElementById('vendors-list');
+      if (!appData.vendors.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No vendors found</td></tr>';
+        return;
+      }
+      tbody.innerHTML = appData.vendors.map(vendor => {
+        const vendorPurchases = appData.purchases.filter(p => p.party === vendor.name);
+        const totalAmount = vendorPurchases.reduce((sum, purchase) => sum + calculateTotals(purchase.items).total, 0);
+        return `
+          <tr>
+            <td>${escapeHtml(vendor.name)}</td>
+            <td>${escapeHtml(vendor.phone || '-')}</td>
+            <td>${escapeHtml(vendor.gstin || '-')}</td>
+            <td>${vendorPurchases.length}</td>
+            <td>${formatCurrency(totalAmount)}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderProductsTable() {
+      const tbody = document.getElementById('products-list');
+      if (!appData.products.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No products found</td></tr>';
+        return;
+      }
+      tbody.innerHTML = appData.products.map((product, idx) => `
+        <tr>
+          <td>${escapeHtml(product.name)}</td>
+          <td>${escapeHtml(product.unit || '-')}</td>
+          <td>${formatCurrency(product.salePrice)}</td>
+          <td>${formatCurrency(product.purchasePrice)}</td>
+          <td>${product.gst || 0}%</td>
+          <td>${product.stock || 0}</td>
+          <td>
+            <button class="btn sm" onclick="editProduct(${idx})"><i class="ti ti-edit"></i></button>
+            <button class="btn sm danger" onclick="deleteProduct(${idx})"><i class="ti ti-trash"></i></button>
+          </td>
+        </tr>
+      `).join('');
     }
 
     function renderDashboard() {
-      const sTotal = store.sales.reduce((a, s) => a + calcTotals(s.items).total, 0);
-      const pTotal = store.purchases.reduce((a, p) => a + calcTotals(p.items).total, 0);
-      const paid = store.sales.filter(s => s.status === 'paid').reduce((a, s) => a + calcTotals(s.items).total, 0);
-      const pending = store.sales.filter(s => s.status === 'pending').reduce((a, s) => a + calcTotals(s.items).total, 0);
-      document.getElementById('dash-stats').innerHTML = `
-        <div class="stat-card"><div class="stat-top"><span class="stat-label">Total Sales</span><i class="ti ti-trending-up"></i></div><div class="stat-val">${fmt(sTotal)}</div></div>
-        <div class="stat-card amber"><div class="stat-top"><span class="stat-label">Total Purchases</span><i class="ti ti-package-import"></i></div><div class="stat-val amber">${fmt(pTotal)}</div></div>
-        <div class="stat-card green"><div class="stat-top"><span class="stat-label">Collected</span><i class="ti ti-circle-check"></i></div><div class="stat-val green">${fmt(paid)}</div></div>
-        <div class="stat-card red"><div class="stat-top"><span class="stat-label">Pending</span><i class="ti ti-clock"></i></div><div class="stat-val red">${fmt(pending)}</div></div>`;
-      document.querySelector('#dash-sales-table tbody').innerHTML = store.sales.slice(-3).reverse().map(s => `<tr><td>${s.party}</td><td class="cell-strong">${fmt(calcTotals(s.items).total)}</td><td>${badge(s.status)}</td></tr>`).join('');
-      document.querySelector('#dash-purchase-table tbody').innerHTML = store.purchases.slice(-3).reverse().map(p => `<tr><td>${p.party}</td><td class="cell-strong">${fmt(calcTotals(p.items).total)}</td><td>${badge(p.status)}</td></tr>`).join('');
-    }
-
-    function badge(s) { return `<span class="badge ${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</span>`; }
-
-    function renderTable(type) {
-      const data = store[type === 'sales' ? 'sales' : 'purchases'];
-      const tbody = document.getElementById(type === 'sales' ? 'sales-tbody' : 'purchase-tbody');
-      if (!data.length) { tbody.innerHTML = `<tr><td colspan="8" class="empty">Koi entry nahi hai. Naya ${type === 'sales' ? 'Invoice' : 'Bill'} banayein.</td></tr>`; return; }
-      tbody.innerHTML = data.map((r, i) => {
-        const t = calcTotals(r.items);
-        return `<tr>
-          <td>${i + 1}</td><td class="cell-strong">${r.invoiceNo}</td><td>${r.party}</td>
-          <td>${r.date}</td><td>${r.items.length} item${r.items.length > 1 ? 's' : ''}</td>
-          <td class="cell-strong">${fmt(t.total)}</td><td>${badge(r.status)}</td>
-          <td><button class="btn sm icon" title="View" onclick="openInvoiceView('${type}',${i})"><i class="ti ti-eye"></i></button> <button class="btn sm icon" title="Edit" onclick="editEntry(${i},'${type}')"><i class="ti ti-edit"></i></button> <button class="btn sm icon danger" title="Delete" onclick="deleteEntry(${i},'${type}')"><i class="ti ti-trash"></i></button></td>
-        </tr>`;
-      }).join('');
-    }
-
-    function renderParties(type) {
-      const isC = type === 'customers';
-      const data = isC ? store.customers : store.vendors;
-      const tbody = document.getElementById(type + '-tbody');
-      const bills = isC ? store.sales : store.purchases;
-      if (!data.length) { tbody.innerHTML = `<tr><td colspan="${isC ? 7 : 6}" class="empty">Koi ${isC ? 'customer' : 'vendor'} nahi. Abhi add karein.</td></tr>`; return; }
-      tbody.innerHTML = data.map((p, i) => {
-        const related = bills.filter(b => b.party === p.name);
-        const total = related.reduce((a, b) => a + calcTotals(b.items).total, 0);
-        return `<tr><td>${i + 1}</td><td class="cell-strong">${p.name}</td><td>${p.phone || '-'}</td><td>${p.gstin || '-'}</td><td>${related.length}</td><td class="cell-strong">${fmt(total)}</td>${isC ? `<td><button class="btn sm" onclick="openCustomerLedgerByIndex(${i})"><i class="ti ti-eye"></i>View</button></td>` : ''}</tr>`;
-      }).join('');
-    }
-
-    function renderProducts() {
-      const tbody = document.getElementById('products-tbody');
-      if (!store.products.length) { tbody.innerHTML = '<tr><td colspan="8" class="empty">Koi product nahi. Abhi add karein.</td></tr>'; return; }
-      tbody.innerHTML = store.products.map((p, i) => `<tr>
-        <td>${i + 1}</td><td class="cell-strong">${p.name}</td><td>${p.unit || '-'}</td>
-        <td class="cell-strong">${fmt(p.salePrice || 0)}</td><td>${fmt(p.purchasePrice || 0)}</td>
-        <td>${p.gst || 0}%</td><td>${p.stock || 0}</td>
-        <td><button class="btn sm icon" title="Edit" onclick="openProductModal(${i})"><i class="ti ti-edit"></i></button> <button class="btn sm icon danger" title="Delete" onclick="deleteProduct(${i})"><i class="ti ti-trash"></i></button></td>
-      </tr>`).join('');
-    }
-
-    function updateProductList() {
-      document.getElementById('product-list').innerHTML = store.products.map(p => `<option value="${p.name}">${fmt(p.salePrice || 0)} / ${p.unit || 'unit'}</option>`).join('');
-    }
-
-    function findProduct(name) {
-      return store.products.find(p => p.name.toLowerCase() === String(name).trim().toLowerCase());
-    }
-
-    function setupLedgerYears() {
-      const years = [...new Set(store.sales.map(s => new Date(s.date + 'T00:00:00').getFullYear()))].sort((a, b) => b - a);
-      const currentYear = new Date().getFullYear();
-      if (!years.includes(currentYear)) years.unshift(currentYear);
-      document.getElementById('ledger-year').innerHTML = '<option value="">All years</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
-    }
-
-    function openCustomerLedgerByIndex(index) {
-      openCustomerLedger(store.customers[index].name);
-    }
-
-    function openCustomerLedger(customerName) {
-      activeLedgerCustomer = customerName;
-      setupLedgerYears();
-      document.getElementById('ledger-title').textContent = `${customerName} - Billing Record`;
-      document.getElementById('ledger-month').value = '';
-      document.getElementById('ledger-year').value = '';
-      renderCustomerLedger();
-      document.getElementById('customer-ledger-modal').classList.add('open');
-    }
-
-    function closeCustomerLedger() { document.getElementById('customer-ledger-modal').classList.remove('open'); }
-
-    function clearLedgerFilter() {
-      document.getElementById('ledger-month').value = '';
-      document.getElementById('ledger-year').value = '';
-      renderCustomerLedger();
-    }
-
-    function filteredCustomerSales() {
-      const month = document.getElementById('ledger-month').value;
-      const year = document.getElementById('ledger-year').value;
-      return store.sales
-        .map((invoice, index) => ({ invoice, index }))
-        .filter(({ invoice }) => {
-          if (invoice.party !== activeLedgerCustomer) return false;
-          if (month && !invoice.date.startsWith(month)) return false;
-          if (year && new Date(invoice.date + 'T00:00:00').getFullYear() !== Number(year)) return false;
-          return true;
-        });
-    }
-
-    function renderCustomerLedger() {
-      const rows = filteredCustomerSales();
-      const total = rows.reduce((a, row) => a + calcTotals(row.invoice.items).total, 0);
-      const paid = rows.filter(row => row.invoice.status === 'paid').reduce((a, row) => a + calcTotals(row.invoice.items).total, 0);
-      const pending = rows.filter(row => row.invoice.status === 'pending').reduce((a, row) => a + calcTotals(row.invoice.items).total, 0);
-      document.getElementById('ledger-summary').innerHTML = `
-        <div class="mini-stat"><span>Total Bills</span><strong>${rows.length}</strong></div>
-        <div class="mini-stat"><span>Total Billing</span><strong>${fmt(total)}</strong></div>
-        <div class="mini-stat"><span>Pending</span><strong>${fmt(pending)}</strong></div>`;
-      const tbody = document.getElementById('ledger-tbody');
-      if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">Is filter me koi invoice nahi mila.</td></tr>'; return; }
-      tbody.innerHTML = rows.map((row, i) => {
-        const r = row.invoice;
-        const t = calcTotals(r.items);
-        return `<tr>
-          <td>${i + 1}</td><td class="cell-strong">${r.invoiceNo}</td><td>${niceDate(r.date)}</td>
-          <td>${r.items.length} item${r.items.length > 1 ? 's' : ''}</td><td class="cell-strong">${fmt(t.total)}</td><td>${badge(r.status)}</td>
-          <td><button class="btn sm" onclick="openInvoiceView('sales',${row.index})"><i class="ti ti-eye"></i>View</button></td>
-        </tr>`;
-      }).join('');
-    }
-
-    function invoiceHTML(type, index) {
-      const data = type === 'sales' ? store.sales : store.purchases;
-      const r = data[index];
-      const partyList = type === 'sales' ? store.customers : store.vendors;
-      const party = partyList.find(p => p.name === r.party) || {};
-      const totals = calcTotals(r.items);
-      const title = type === 'sales' ? 'SALE INVOICE' : 'PURCHASE BILL';
-      const billLabel = type === 'sales' ? 'Invoice No' : 'Bill No';
-      const rows = r.items.map((item, i) => {
-        const c = calcItem(item);
-        return `<tr><td>${i + 1}</td><td>${esc(item.name)}</td><td>${esc(item.qty)}</td><td>${esc(item.unit)}</td><td>${fmt(item.price)}</td><td>${esc(item.gst)}%</td><td class="cell-strong">${fmt(c.total)}</td></tr>`;
-      }).join('');
-      return `
-        <div class="invoice-head">
-          <div><h3>BillPro</h3><div>Business Billing</div><div>India</div></div>
-          <div class="invoice-meta"><strong>${title}</strong><br>${billLabel}: ${esc(r.invoiceNo)}<br>Date: ${niceDate(r.date)}<br>Due: ${niceDate(r.due)}<br>Status: ${esc(r.status)}</div>
-        </div>
-        <div class="invoice-party">
-          <div><span>Bill To</span><strong>${esc(r.party)}</strong><div>Phone: ${esc(r.phone || party.phone || '-')}</div><div>GSTIN: ${esc(party.gstin || '-')}</div><div>${esc(party.address || '')}</div></div>
-          <div><span>Summary</span><strong>${fmt(totals.total)}</strong><div>Subtotal: ${fmt(totals.sub)}</div><div>GST: ${fmt(totals.gst)}</div></div>
-        </div>
-        <div class="table-wrap"><table><thead><tr><th>#</th><th>Item</th><th>Qty</th><th>Unit</th><th>Price</th><th>GST</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <div class="total-section"><div class="total-row"><span>Subtotal</span><span>${fmt(totals.sub)}</span></div><div class="total-row"><span>GST</span><span>${fmt(totals.gst)}</span></div><div class="total-row grand"><span>Total</span><span>${fmt(totals.total)}</span></div></div>
-        ${r.notes ? `<div class="invoice-note"><strong>Notes:</strong> ${esc(r.notes)}</div>` : ''}
+      const totalSales = appData.sales.reduce((sum, sale) => sum + calculateTotals(sale.items).total, 0);
+      const totalPurchases = appData.purchases.reduce((sum, purchase) => sum + calculateTotals(purchase.items).total, 0);
+      const pendingAmount = appData.sales.filter(s => s.status === 'pending').reduce((sum, sale) => sum + calculateTotals(sale.items).total, 0);
+      const paidAmount = appData.sales.filter(s => s.status === 'paid').reduce((sum, sale) => sum + calculateTotals(sale.items).total, 0);
+      
+      document.getElementById('dashboard-stats').innerHTML = `
+        <div class="stat-card"><div class="stat-top"><span class="stat-label">Total Sales</span><i class="ti ti-trending-up"></i></div><div class="stat-val">${formatCurrency(totalSales)}</div></div>
+        <div class="stat-card amber"><div class="stat-top"><span class="stat-label">Total Purchases</span><i class="ti ti-shopping-cart"></i></div><div class="stat-val amber">${formatCurrency(totalPurchases)}</div></div>
+        <div class="stat-card green"><div class="stat-top"><span class="stat-label">Collected</span><i class="ti ti-circle-check"></i></div><div class="stat-val green">${formatCurrency(paidAmount)}</div></div>
+        <div class="stat-card red"><div class="stat-top"><span class="stat-label">Pending</span><i class="ti ti-clock"></i></div><div class="stat-val red">${formatCurrency(pendingAmount)}</div></div>
       `;
+      
+      const recentSales = [...appData.sales].reverse().slice(0, 5);
+      document.querySelector('#recent-sales tbody').innerHTML = recentSales.map(sale => `
+        <tr><td>${escapeHtml(sale.invoiceNo)}</td><td>${escapeHtml(sale.party)}</td><td>${formatCurrency(calculateTotals(sale.items).total)}</td><td><span class="badge ${sale.status}">${sale.status}</span></td></tr>
+      `).join('');
+      
+      const recentPurchases = [...appData.purchases].reverse().slice(0, 5);
+      document.querySelector('#recent-purchases tbody').innerHTML = recentPurchases.map(purchase => `
+        <tr><td>${escapeHtml(purchase.invoiceNo)}</td><td>${escapeHtml(purchase.party)}</td><td>${formatCurrency(calculateTotals(purchase.items).total)}</td><td><span class="badge ${purchase.status}">${purchase.status}</span></td></tr>
+      `).join('');
     }
 
-    function openInvoiceView(type, index) {
-      activeInvoice = { type, index };
-      document.getElementById('invoice-preview').innerHTML = invoiceHTML(type, index);
-      document.getElementById('invoice-view-modal').classList.add('open');
+    function updatePartyDatalist() {
+      const parties = currentInvoiceType === 'sale' ? appData.customers : appData.vendors;
+      document.getElementById('party-list').innerHTML = parties.map(p => `<option value="${escapeHtml(p.name)}">`).join('');
     }
 
-    function closeInvoiceView() { document.getElementById('invoice-view-modal').classList.remove('open'); }
-
-    function printInvoice() {
-      if (!activeInvoice) return;
-      window.print();
+    function updateProductDatalist() {
+      document.getElementById('product-search-list').innerHTML = appData.products.map(p => `<option value="${escapeHtml(p.name)}">`).join('');
     }
 
-    function openModal(type, idx = -1) {
-      currentType = type; editIndex = idx;
-      const isSale = type === 'sale';
-      document.getElementById('modal-title').textContent = idx >= 0 ? (isSale ? 'Edit Invoice' : 'Edit Purchase Bill') : (isSale ? 'Create Invoice' : 'Create Purchase Bill');
-      document.getElementById('party-label').textContent = isSale ? 'Customer Name' : 'Vendor Name';
-      document.getElementById('f-bill-prefix').value = isSale ? 'INV-' : 'PUR-';
-      const parties = isSale ? store.customers : store.vendors;
-      document.getElementById('party-list').innerHTML = parties.map(p => `<option value="${p.name}">`).join('');
-      updateProductList();
+    // Invoice functions
+    window.openInvoiceModal = function(type, index = -1) {
+      currentInvoiceType = type;
+      editingInvoiceIndex = index;
+      currentItems = [];
+      
+      const title = type === 'sale' ? 'Sale Invoice' : 'Purchase Bill';
+      document.getElementById('invoice-modal-title').innerText = index >= 0 ? `Edit ${title}` : `Create ${title}`;
+      document.getElementById('party-label').innerText = type === 'sale' ? 'Customer Name' : 'Vendor Name';
+      
       const today = new Date().toISOString().split('T')[0];
-      if (idx >= 0) {
-        const r = isSale ? store.sales[idx] : store.purchases[idx];
-        const parts = splitBillNo(r.invoiceNo, isSale ? 'INV-' : 'PUR-');
-        document.getElementById('f-party').value = r.party;
-        document.getElementById('f-bill-prefix').value = parts.prefix;
-        document.getElementById('f-billno').value = parts.number;
-        document.getElementById('f-date').value = r.date;
-        document.getElementById('f-due').value = r.due;
-        document.getElementById('f-phone').value = r.phone;
-        document.getElementById('f-status').value = r.status;
-        document.getElementById('f-notes').value = r.notes;
-        document.getElementById('items-body').innerHTML = '';
-        r.items.forEach(it => addItemRow(it));
+      document.getElementById('invoice-date').value = today;
+      document.getElementById('due-date').value = '';
+      document.getElementById('invoice-notes').value = '';
+      document.getElementById('payment-status').value = 'pending';
+      document.getElementById('party-name').value = '';
+      
+      if (type === 'sale') {
+        document.getElementById('invoice-prefix').value = 'INV-';
+        const nextNum = appData.sales.length + 1;
+        document.getElementById('invoice-number').value = String(nextNum).padStart(3, '0');
       } else {
-        document.getElementById('f-party').value = '';
-        document.getElementById('f-bill-prefix').value = isSale ? 'INV-' : 'PUR-';
-        document.getElementById('f-billno').value = String(isSale ? invoiceCounters.sale : invoiceCounters.purchase);
-        document.getElementById('f-date').value = today;
-        document.getElementById('f-due').value = '';
-        document.getElementById('f-phone').value = '';
-        document.getElementById('f-status').value = 'pending';
-        document.getElementById('f-notes').value = '';
-        document.getElementById('items-body').innerHTML = '';
-        addItemRow();
+        document.getElementById('invoice-prefix').value = 'PUR-';
+        const nextNum = appData.purchases.length + 1;
+        document.getElementById('invoice-number').value = String(nextNum).padStart(3, '0');
       }
-      updateTotals();
+      
+      if (index >= 0) {
+        const invoice = type === 'sale' ? appData.sales[index] : appData.purchases[index];
+        document.getElementById('party-name').value = invoice.party;
+        document.getElementById('invoice-date').value = invoice.date;
+        document.getElementById('due-date').value = invoice.dueDate || '';
+        document.getElementById('invoice-notes').value = invoice.notes || '';
+        document.getElementById('payment-status').value = invoice.status;
+        currentItems = [...invoice.items];
+        
+        const parts = invoice.invoiceNo.match(/^([A-Za-z]+-)(\d+)$/);
+        if (parts) {
+          document.getElementById('invoice-prefix').value = parts[1];
+          document.getElementById('invoice-number').value = parts[2];
+        }
+      }
+      
+      updatePartyDatalist();
+      renderItemsTable();
       document.getElementById('invoice-modal').classList.add('open');
-    }
-
-    function closeModal() { document.getElementById('invoice-modal').classList.remove('open'); }
-
-    function splitBillNo(value, fallbackPrefix) {
-      const match = String(value || '').match(/^([A-Za-z]+-?0*)(.*)$/);
-      if (!match) return { prefix: fallbackPrefix, number: value || '' };
-      return { prefix: match[1].replace(/0+$/, '') || fallbackPrefix, number: match[2] || '' };
-    }
-
-    function fullBillNo() {
-      const prefix = document.getElementById('f-bill-prefix').value.trim() || (currentType === 'sale' ? 'INV-' : 'PUR-');
-      const number = document.getElementById('f-billno').value.trim();
-      return prefix + number.padStart(3, '0');
-    }
-
-    function addItemRow(item = {}) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td><input type="text" list="product-list" placeholder="Item name" value="${item.name || ''}" oninput="handleProductInput(this)"></td>
-        <td><input type="number" min="1" value="${item.qty || 1}" oninput="updateTotals()"></td>
-        <td><input type="text" value="${item.unit || 'pcs'}" oninput="updateTotals()"></td>
-        <td><input type="number" min="0" value="${item.price || ''}" placeholder="0" oninput="updateTotals()"></td>
-        <td><input type="number" min="0" max="100" value="${item.gst || 18}" oninput="updateTotals()"></td>
-        <td><button class="btn sm icon danger" title="Remove" onclick="this.closest('tr').remove();updateTotals()"><i class="ti ti-trash"></i></button></td>`;
-      document.getElementById('items-body').appendChild(tr);
-    }
-
-    function handleProductInput(input) {
-      const product = findProduct(input.value);
-      if (product) {
-        const rowInputs = input.closest('tr').querySelectorAll('input');
-        rowInputs[2].value = product.unit || 'pcs';
-        rowInputs[3].value = currentType === 'purchase' ? (product.purchasePrice || 0) : (product.salePrice || 0);
-        rowInputs[4].value = product.gst || 0;
+    };
+    
+    window.closeInvoiceModal = function() {
+      document.getElementById('invoice-modal').classList.remove('open');
+    };
+    
+    window.addQuickItem = function() {
+      const productName = document.getElementById('quick-product').value;
+      const qty = parseFloat(document.getElementById('quick-qty').value) || 1;
+      
+      const product = appData.products.find(p => p.name === productName);
+      if (!product) {
+        alert('Please select a product from the list');
+        return;
       }
-      updateTotals();
-    }
-
-    function addQuickProduct() {
-      const nameInput = document.getElementById('quick-product');
-      const qtyInput = document.getElementById('quick-qty');
-      const name = nameInput.value.trim();
-      if (!name) { alert('Product select karein'); return; }
-      const product = findProduct(name);
-      addItemRow({
-        name,
-        qty: parseFloat(qtyInput.value) || 1,
-        unit: product?.unit || 'pcs',
-        price: currentType === 'purchase' ? (product?.purchasePrice || 0) : (product?.salePrice || 0),
-        gst: product?.gst ?? 18
+      
+      const price = currentInvoiceType === 'sale' ? product.salePrice : product.purchasePrice;
+      currentItems.push({
+        name: product.name,
+        qty: qty,
+        unit: product.unit || 'pcs',
+        price: price || 0,
+        gst: product.gst || 18
       });
-      nameInput.value = '';
-      qtyInput.value = 1;
-      updateTotals();
-    }
-
-    function getItemRows() {
-      const rows = [];
-      document.querySelectorAll('#items-body tr').forEach(tr => {
-        const ins = tr.querySelectorAll('input');
-        rows.push({ name: ins[0].value, qty: parseFloat(ins[1].value) || 0, unit: ins[2].value, price: parseFloat(ins[3].value) || 0, gst: parseFloat(ins[4].value) || 0 });
-      });
-      return rows;
-    }
-
-    function updateTotals() {
-      const t = calcTotals(getItemRows());
-      document.getElementById('t-sub').textContent = fmt(t.sub);
-      document.getElementById('t-gst').textContent = fmt(t.gst);
-      document.getElementById('t-total').textContent = fmt(t.total);
-    }
-
-    function saveEntry() {
-      const party = document.getElementById('f-party').value.trim();
-      if (!party) { alert('Party ka naam daalein'); return; }
-      const partyRecord = (currentType === 'sale' ? store.customers : store.vendors).find(p => p.name === party);
-      const entry = {
-        invoiceNo: fullBillNo(),
-        party,
-        phone: document.getElementById('f-phone').value || partyRecord?.phone || '',
-        date: document.getElementById('f-date').value,
-        due: document.getElementById('f-due').value,
-        items: getItemRows(),
-        status: document.getElementById('f-status').value,
-        notes: document.getElementById('f-notes').value
+      
+      renderItemsTable();
+      document.getElementById('quick-product').value = '';
+      document.getElementById('quick-qty').value = '1';
+    };
+    
+    window.updateItem = function(index, field, value) {
+      currentItems[index][field] = parseFloat(value) || 0;
+      renderItemsTable();
+    };
+    
+    window.removeItem = function(index) {
+      currentItems.splice(index, 1);
+      renderItemsTable();
+    };
+    
+    window.saveInvoice = async function() {
+      const party = document.getElementById('party-name').value.trim();
+      if (!party) {
+        alert('Please select a party');
+        return;
+      }
+      if (!currentItems.length) {
+        alert('Please add at least one item');
+        return;
+      }
+      
+      const invoiceNo = document.getElementById('invoice-prefix').value + document.getElementById('invoice-number').value.padStart(3, '0');
+      const invoice = {
+        invoiceNo: invoiceNo,
+        party: party,
+        date: document.getElementById('invoice-date').value,
+        dueDate: document.getElementById('due-date').value,
+        items: [...currentItems],
+        status: document.getElementById('payment-status').value,
+        notes: document.getElementById('invoice-notes').value,
+        createdAt: new Date().toISOString()
       };
-      const isSale = currentType === 'sale';
-      if (editIndex >= 0) {
-        if (isSale) store.sales[editIndex] = entry; else store.purchases[editIndex] = entry;
+      
+      if (editingInvoiceIndex >= 0) {
+        if (currentInvoiceType === 'sale') {
+          appData.sales[editingInvoiceIndex] = invoice;
+        } else {
+          appData.purchases[editingInvoiceIndex] = invoice;
+        }
       } else {
-        if (isSale) { store.sales.push(entry); invoiceCounters.sale++; }
-        else { store.purchases.push(entry); invoiceCounters.purchase++; }
-        if (isSale && !store.customers.find(c => c.name === party)) store.customers.push({ name: party, phone: entry.phone, gstin: '', address: '' });
-        if (!isSale && !store.vendors.find(v => v.name === party)) store.vendors.push({ name: party, phone: entry.phone, gstin: '', address: '' });
-        entry.items.forEach(item => {
-          if (item.name && !findProduct(item.name)) {
-            store.products.push({ name: item.name, unit: item.unit || 'pcs', salePrice: item.price || 0, purchasePrice: item.price || 0, gst: item.gst || 0, stock: 0 });
+        if (currentInvoiceType === 'sale') {
+          appData.sales.push(invoice);
+          // Auto add customer if new
+          if (!appData.customers.find(c => c.name === party)) {
+            appData.customers.push({ name: party, phone: '', gstin: '', address: '' });
           }
-        });
+        } else {
+          appData.purchases.push(invoice);
+          if (!appData.vendors.find(v => v.name === party)) {
+            appData.vendors.push({ name: party, phone: '', gstin: '', address: '' });
+          }
+        }
       }
-      saveData();
-      closeModal();
-      renderTable(isSale ? 'sales' : 'purchase');
-      if (activeLedgerCustomer) renderCustomerLedger();
-    }
-
-    function editEntry(idx, type) { openModal(type === 'sales' ? 'sale' : 'purchase', idx); }
-    function deleteEntry(idx, type) {
-      if (!confirm('Delete karna chahte hain?')) return;
-      if (type === 'sales') store.sales.splice(idx, 1); else store.purchases.splice(idx, 1);
-      saveData();
-      renderTable(type);
-      if (activeLedgerCustomer && type === 'sales') renderCustomerLedger();
-    }
-
-    function openPartyModal(type) {
-      currentPartyType = type; editPartyIndex = -1;
-      document.getElementById('party-modal-title').textContent = `Add ${type === 'customer' ? 'Customer' : 'Vendor'}`;
-      ['p-name', 'p-phone', 'p-gstin', 'p-address'].forEach(id => document.getElementById(id).value = '');
+      
+      await saveDataToFirestore();
+      renderAllTables();
+      closeInvoiceModal();
+    };
+    
+    window.viewInvoice = function(type, index) {
+      const invoice = type === 'sales' ? appData.sales[index] : appData.purchases[index];
+      const totals = calculateTotals(invoice.items);
+      
+      const html = `
+        <div class="invoice-paper">
+          <div class="invoice-head">
+            <div><h3>BillPro</h3><p>Business Billing Solution</p></div>
+            <div class="invoice-meta">
+              <strong>${type === 'sales' ? 'TAX INVOICE' : 'PURCHASE BILL'}</strong><br>
+              No: ${invoice.invoiceNo}<br>
+              Date: ${invoice.date}<br>
+              Status: ${invoice.status.toUpperCase()}
+            </div>
+          </div>
+          <div class="invoice-party">
+            <div><strong>Party:</strong><br>${escapeHtml(invoice.party)}</div>
+            <div><strong>Amount:</strong><br>${formatCurrency(totals.total)}</div>
+          </div>
+          <div class="table-wrap">
+            <table style="width: 100%;">
+              <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Price</th><th>GST</th><th>Total</th></tr></thead>
+              <tbody>
+                ${invoice.items.map(item => {
+                  const total = calculateItemTotal(item);
+                  return `<tr><td>${escapeHtml(item.name)}</td><td>${item.qty}</td><td>${escapeHtml(item.unit)}</td><td>${formatCurrency(item.price)}</td><td>${item.gst}%</td><td>${formatCurrency(total)}</td></tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="total-section" style="margin-top: 16px;">
+            <div class="total-row"><span>Subtotal:</span><span>${formatCurrency(totals.subtotal)}</span></div>
+            <div class="total-row"><span>GST:</span><span>${formatCurrency(totals.gst)}</span></div>
+            <div class="total-row grand"><span>Grand Total:</span><span>${formatCurrency(totals.total)}</span></div>
+          </div>
+          ${invoice.notes ? `<div class="invoice-note"><strong>Notes:</strong> ${escapeHtml(invoice.notes)}</div>` : ''}
+        </div>
+      `;
+      
+      document.getElementById('invoice-view-content').innerHTML = html;
+      document.getElementById('view-modal').classList.add('open');
+    };
+    
+    window.editInvoice = function(type, index) {
+      openInvoiceModal(type === 'sales' ? 'sale' : 'purchase', index);
+    };
+    
+    window.deleteInvoice = async function(type, index) {
+      if (!confirm('Are you sure you want to delete this invoice?')) return;
+      if (type === 'sales') {
+        appData.sales.splice(index, 1);
+      } else {
+        appData.purchases.splice(index, 1);
+      }
+      await saveDataToFirestore();
+      renderAllTables();
+    };
+    
+    // Party functions
+    window.openPartyModal = function(type) {
+      currentPartyType = type;
+      document.getElementById('party-modal-title').innerText = type === 'customer' ? 'Add Customer' : 'Add Vendor';
+      document.getElementById('party-name-input').value = '';
+      document.getElementById('party-phone').value = '';
+      document.getElementById('party-gstin').value = '';
+      document.getElementById('party-address').value = '';
       document.getElementById('party-modal').classList.add('open');
-    }
-    function closePartyModal() { document.getElementById('party-modal').classList.remove('open'); }
-    function saveParty() {
-      const name = document.getElementById('p-name').value.trim();
-      if (!name) { alert('Naam daalein'); return; }
-      const p = { name, phone: document.getElementById('p-phone').value, gstin: document.getElementById('p-gstin').value, address: document.getElementById('p-address').value };
-      if (currentPartyType === 'customer') { store.customers.push(p); renderParties('customers'); }
-      else { store.vendors.push(p); renderParties('vendors'); }
-      saveData();
-      closePartyModal();
-    }
-
-    function openProductModal(idx = -1) {
-      editProductIndex = idx;
-      document.getElementById('product-modal-title').textContent = idx >= 0 ? 'Edit Product' : 'Add Product';
-      const p = idx >= 0 ? store.products[idx] : { name: '', unit: 'pcs', salePrice: '', purchasePrice: '', gst: 18, stock: 0 };
-      document.getElementById('pr-name').value = p.name || '';
-      document.getElementById('pr-unit').value = p.unit || 'pcs';
-      document.getElementById('pr-sale').value = p.salePrice ?? '';
-      document.getElementById('pr-purchase').value = p.purchasePrice ?? '';
-      document.getElementById('pr-gst').value = p.gst ?? 18;
-      document.getElementById('pr-stock').value = p.stock ?? 0;
-      document.getElementById('product-modal').classList.add('open');
-    }
-
-    function closeProductModal() { document.getElementById('product-modal').classList.remove('open'); }
-
-    function saveProduct() {
-      const name = document.getElementById('pr-name').value.trim();
-      if (!name) { alert('Product ka naam daalein'); return; }
-      const product = {
-        name,
-        unit: document.getElementById('pr-unit').value || 'pcs',
-        salePrice: parseFloat(document.getElementById('pr-sale').value) || 0,
-        purchasePrice: parseFloat(document.getElementById('pr-purchase').value) || 0,
-        gst: parseFloat(document.getElementById('pr-gst').value) || 0,
-        stock: parseFloat(document.getElementById('pr-stock').value) || 0
+    };
+    
+    window.closePartyModal = function() {
+      document.getElementById('party-modal').classList.remove('open');
+    };
+    
+    window.saveParty = async function() {
+      const name = document.getElementById('party-name-input').value.trim();
+      if (!name) {
+        alert('Please enter name');
+        return;
+      }
+      
+      const party = {
+        name: name,
+        phone: document.getElementById('party-phone').value,
+        gstin: document.getElementById('party-gstin').value,
+        address: document.getElementById('party-address').value
       };
-      if (editProductIndex >= 0) store.products[editProductIndex] = product;
-      else store.products.push(product);
-      saveData();
+      
+      if (currentPartyType === 'customer') {
+        if (!appData.customers.find(c => c.name === name)) {
+          appData.customers.push(party);
+        }
+      } else {
+        if (!appData.vendors.find(v => v.name === name)) {
+          appData.vendors.push(party);
+        }
+      }
+      
+      await saveDataToFirestore();
+      renderAllTables();
+      closePartyModal();
+    };
+    
+    // Product functions
+    window.openProductModal = function(index = -1) {
+      editingProductIndex = index;
+      if (index >= 0) {
+        const product = appData.products[index];
+        document.getElementById('product-name').value = product.name;
+        document.getElementById('product-unit').value = product.unit || '';
+        document.getElementById('product-sale-price').value = product.salePrice || 0;
+        document.getElementById('product-purchase-price').value = product.purchasePrice || 0;
+        document.getElementById('product-gst').value = product.gst || 18;
+        document.getElementById('product-stock').value = product.stock || 0;
+      } else {
+        document.getElementById('product-name').value = '';
+        document.getElementById('product-unit').value = '';
+        document.getElementById('product-sale-price').value = '';
+        document.getElementById('product-purchase-price').value = '';
+        document.getElementById('product-gst').value = '18';
+        document.getElementById('product-stock').value = '0';
+      }
+      document.getElementById('product-modal').classList.add('open');
+    };
+    
+    window.closeProductModal = function() {
+      document.getElementById('product-modal').classList.remove('open');
+    };
+    
+    let editingProductIndex = -1;
+    
+    window.saveProduct = async function() {
+      const name = document.getElementById('product-name').value.trim();
+      if (!name) {
+        alert('Please enter product name');
+        return;
+      }
+      
+      const product = {
+        name: name,
+        unit: document.getElementById('product-unit').value,
+        salePrice: parseFloat(document.getElementById('product-sale-price').value) || 0,
+        purchasePrice: parseFloat(document.getElementById('product-purchase-price').value) || 0,
+        gst: parseFloat(document.getElementById('product-gst').value) || 0,
+        stock: parseFloat(document.getElementById('product-stock').value) || 0
+      };
+      
+      if (editingProductIndex >= 0) {
+        appData.products[editingProductIndex] = product;
+      } else {
+        if (appData.products.find(p => p.name === name)) {
+          alert('Product already exists');
+          return;
+        }
+        appData.products.push(product);
+      }
+      
+      await saveDataToFirestore();
+      renderAllTables();
       closeProductModal();
-      renderProducts();
-      updateProductList();
-    }
-
-    function deleteProduct(idx) {
-      if (!confirm('Product delete karna chahte hain?')) return;
-      store.products.splice(idx, 1);
-      saveData();
-      renderProducts();
-      updateProductList();
-    }
-
-    function filterTable(tableId, q) {
-      document.querySelectorAll(`#${tableId} tbody tr`).forEach(r => {
-        r.style.display = r.textContent.toLowerCase().includes(q.toLowerCase()) ? '' : 'none';
+    };
+    
+    window.editProduct = function(index) {
+      openProductModal(index);
+    };
+    
+    window.deleteProduct = async function(index) {
+      if (!confirm('Delete this product?')) return;
+      appData.products.splice(index, 1);
+      await saveDataToFirestore();
+      renderAllTables();
+    };
+    
+    window.closeViewModal = function() {
+      document.getElementById('view-modal').classList.remove('open');
+    };
+    
+    window.printInvoice = function() {
+      window.print();
+    };
+    
+    window.filterTable = function(tableId, searchText) {
+      const table = document.getElementById(tableId);
+      const rows = table.querySelectorAll('tbody tr');
+      rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(searchText.toLowerCase()) ? '' : 'none';
       });
+    };
+    
+    // Page navigation
+    window.showPage = function(page, btn) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.getElementById(`page-${page}`).classList.add('active');
+      btn.classList.add('active');
+      
+      const titles = {
+        dashboard: 'Dashboard',
+        sales: 'Sale Invoices',
+        purchase: 'Purchase Bills',
+        customers: 'Customers',
+        vendors: 'Vendors',
+        products: 'Products'
+      };
+      document.getElementById('page-title').innerText = titles[page];
+    };
+    
+    // Auth functions
+    let authMode = 'login';
+    
+    function setAuthMode(mode) {
+      authMode = mode;
+      const isLogin = mode === 'login';
+      document.getElementById('auth-title').innerText = isLogin ? 'Login' : 'Create Account';
+      document.getElementById('auth-copy').innerText = isLogin 
+        ? 'Enter your credentials to access your account'
+        : 'Create a new account to start billing';
+      document.getElementById('auth-main-btn').innerText = isLogin ? 'Login' : 'Sign Up';
+      document.getElementById('auth-switch-btn').innerText = isLogin ? 'Create Account' : 'Back to Login';
+      document.getElementById('forgot-btn').style.display = isLogin ? 'block' : 'none';
     }
-
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { closeModal(); closePartyModal(); closeProductModal(); closeCustomerLedger(); closeInvoiceView(); }
+    
+    async function handleAuth() {
+      const email = document.getElementById('auth-user').value;
+      const password = document.getElementById('auth-pass').value;
+      const errorDiv = document.getElementById('auth-error');
+      
+      if (!email || !password) {
+        errorDiv.innerText = 'Please fill all fields';
+        return;
+      }
+      
+      errorDiv.innerText = '';
+      const btn = document.getElementById('auth-main-btn');
+      btn.disabled = true;
+      btn.innerText = 'Processing...';
+      
+      try {
+        if (authMode === 'login') {
+          await signInWithEmailAndPassword(auth, email, password);
+        } else {
+          await createUserWithEmailAndPassword(auth, email, password);
+        }
+      } catch(e) {
+        if (e.code === 'auth/user-not-found') errorDiv.innerText = 'User not found';
+        else if (e.code === 'auth/wrong-password') errorDiv.innerText = 'Wrong password';
+        else if (e.code === 'auth/email-already-in-use') errorDiv.innerText = 'Email already exists';
+        else if (e.code === 'auth/weak-password') errorDiv.innerText = 'Password should be at least 6 characters';
+        else errorDiv.innerText = e.message;
+      } finally {
+        btn.disabled = false;
+        btn.innerText = authMode === 'login' ? 'Login' : 'Sign Up';
+      }
+    }
+    
+    async function handleForgotPassword() {
+      const email = document.getElementById('auth-user').value;
+      const errorDiv = document.getElementById('auth-error');
+      
+      if (!email) {
+        errorDiv.innerText = 'Please enter your email address';
+        return;
+      }
+      
+      errorDiv.innerText = '';
+      const btn = document.getElementById('forgot-btn');
+      btn.disabled = true;
+      btn.innerText = 'Sending...';
+      
+      try {
+        await sendPasswordResetEmail(auth, email);
+        errorDiv.style.color = 'var(--green)';
+        errorDiv.innerText = 'Password reset email sent! Check your inbox.';
+        setTimeout(() => {
+          errorDiv.style.color = 'var(--red)';
+          errorDiv.innerText = '';
+        }, 5000);
+      } catch(e) {
+        if (e.code === 'auth/user-not-found') errorDiv.innerText = 'No account found with this email';
+        else errorDiv.innerText = e.message;
+      } finally {
+        btn.disabled = false;
+        btn.innerText = 'Forgot Password?';
+      }
+    }
+    
+    window.logout = async function() {
+      await signOut(auth);
+    };
+    
+    // Auth state listener
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        currentUser = user;
+        document.body.classList.remove('auth-locked');
+        document.getElementById('user-email').innerText = user.email;
+        await loadDataFromFirestore();
+      } else {
+        currentUser = null;
+        document.body.classList.add('auth-locked');
+        appData = { sales: [], purchases: [], customers: [], vendors: [], products: [] };
+        setAuthMode('login');
+        document.getElementById('auth-user').value = '';
+        document.getElementById('auth-pass').value = '';
+        document.getElementById('auth-error').innerText = '';
+      }
     });
+    
+    document.getElementById('auth-main-btn').onclick = handleAuth;
+    document.getElementById('auth-switch-btn').onclick = () => setAuthMode(authMode === 'login' ? 'signup' : 'login');
+    document.getElementById('forgot-btn').onclick = handleForgotPassword;
+    
+    // Set default date
+    const today = new Date().toISOString().split('T')[0];
+    if (document.getElementById('invoice-date')) {
+      document.getElementById('invoice-date').value = today;
+    }
   </script>
 </body>
 </html>
