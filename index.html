@@ -1906,5 +1906,26 @@
       renderDashboard();
     }
   </script>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-analytics.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBy8UEKBowJP1Vp4QHO4asjPxmgq_UfODM",
+    authDomain: "bill-book-pro-93155.firebaseapp.com",
+    projectId: "bill-book-pro-93155",
+    storageBucket: "bill-book-pro-93155.firebasestorage.app",
+    messagingSenderId: "409759386921",
+    appId: "1:409759386921:web:d557714d258ba865a67b38",
+    measurementId: "G-RKJN725QTP"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+
+  window.firebaseApp = app;
+
+  console.log("Firebase Connected Successfully");
+</script>
 </body>
 </html>
