@@ -241,56 +241,6 @@
     .topbar h1 { font-size: 22px; font-weight: 760; letter-spacing: 0; }
     .topbar p { margin-top: 3px; font-size: 13px; color: var(--muted); }
 
-    .topbar-flag {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      transform: translate(-50%, -50%);
-      width: 96px;
-      height: 58px;
-      border-radius: 8px;
-      overflow: hidden;
-      border: 1px solid rgba(15, 35, 65, .16);
-      box-shadow: 0 12px 28px rgba(24, 34, 48, .14);
-      background: #fff;
-    }
-
-    .topbar-flag::before,
-    .topbar-flag::after {
-      content: "";
-      position: absolute;
-      left: 0;
-      right: 0;
-      height: 33.333%;
-    }
-
-    .topbar-flag::before {
-      top: 0;
-      background: #ff9933;
-    }
-
-    .topbar-flag::after {
-      bottom: 0;
-      background: #138808;
-    }
-
-    .chakra {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      width: 18px;
-      height: 18px;
-      transform: translate(-50%, -50%);
-      border: 2px solid #000080;
-      border-radius: 50%;
-      background:
-        linear-gradient(0deg, transparent 45%, #000080 46%, #000080 54%, transparent 55%),
-        linear-gradient(45deg, transparent 47%, #000080 48%, #000080 52%, transparent 53%),
-        linear-gradient(90deg, transparent 45%, #000080 46%, #000080 54%, transparent 55%),
-        linear-gradient(135deg, transparent 47%, #000080 48%, #000080 52%, transparent 53%);
-      background-color: #fff;
-    }
-
     .content {
       padding: 24px 28px 34px;
       width: min(1360px, 100%);
@@ -933,7 +883,6 @@
     @media (max-width: 680px) {
       .topbar { align-items: flex-start; padding: 14px 16px; }
       .topbar h1 { font-size: 19px; }
-      .topbar-flag { display: none; }
       .create-invoice-head { grid-template-columns: 1fr; }
       .bill-number { grid-template-columns: 1fr 1fr; min-width: 0; }
       .invoice-create-body { padding: 14px; }
@@ -994,7 +943,6 @@
           <h1 id="page-title">Dashboard</h1>
           <p id="page-subtitle">Business ka quick snapshot</p>
         </div>
-        <div class="topbar-flag" title="Tricolor"><span class="chakra"></span></div>
         <div style="display:flex;align-items:center;gap:10px">
           <span class="user-pill"><i class="ti ti-user-circle"></i><span id="current-user-label"></span></span>
           <button class="btn sm" onclick="logout()"><i class="ti ti-logout"></i>Logout</button>
@@ -1253,19 +1201,6 @@
       return btoa(unescape(encodeURIComponent(String(value || ''))));
     }
 
-    function verifyDeletePassword(itemLabel = 'ye item') {
-      const users = readUsers();
-      const user = currentUser ? users[currentUser] : null;
-      if (!user) { alert('Delete ke liye pehle login karein'); return false; }
-      const password = prompt(`${itemLabel} delete karne ke liye apna login password daalein:`);
-      if (password === null) return false;
-      if (user.password !== encodePassword(password)) {
-        alert('Password galat hai. Delete cancel ho gaya.');
-        return false;
-      }
-      return confirm(`${itemLabel} delete karna confirm karein?`);
-    }
-
     function isEmailJsConfigured() {
       return ![EMAILJS_PUBLIC_KEY, EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID].some(v => String(v).startsWith('PASTE_'));
     }
@@ -1522,14 +1457,11 @@
       const data = isC ? store.customers : store.vendors;
       const tbody = document.getElementById(type + '-tbody');
       const bills = isC ? store.sales : store.purchases;
-      if (!data.length) { tbody.innerHTML = `<tr><td colspan="7" class="empty">Koi ${isC ? 'customer' : 'vendor'} nahi. Abhi add karein.</td></tr>`; return; }
+      if (!data.length) { tbody.innerHTML = `<tr><td colspan="${isC ? 7 : 6}" class="empty">Koi ${isC ? 'customer' : 'vendor'} nahi. Abhi add karein.</td></tr>`; return; }
       tbody.innerHTML = data.map((p, i) => {
         const related = bills.filter(b => b.party === p.name);
         const total = related.reduce((a, b) => a + calcTotals(b.items).total, 0);
-        const actions = isC
-          ? `<button class="btn sm" onclick="openCustomerLedgerByIndex(${i})"><i class="ti ti-eye"></i>View</button> <button class="btn sm icon danger" title="Delete" onclick="deleteParty(${i},'customers')"><i class="ti ti-trash"></i></button>`
-          : `<button class="btn sm icon danger" title="Delete" onclick="deleteParty(${i},'vendors')"><i class="ti ti-trash"></i></button>`;
-        return `<tr><td>${i + 1}</td><td class="cell-strong">${p.name}</td><td>${p.phone || '-'}</td><td>${p.gstin || '-'}</td><td>${related.length}</td><td class="cell-strong">${fmt(total)}</td><td>${actions}</td></tr>`;
+        return `<tr><td>${i + 1}</td><td class="cell-strong">${p.name}</td><td>${p.phone || '-'}</td><td>${p.gstin || '-'}</td><td>${related.length}</td><td class="cell-strong">${fmt(total)}</td>${isC ? `<td><button class="btn sm" onclick="openCustomerLedgerByIndex(${i})"><i class="ti ti-eye"></i>View</button></td>` : ''}</tr>`;
       }).join('');
     }
 
@@ -1805,7 +1737,7 @@
 
     function editEntry(idx, type) { openModal(type === 'sales' ? 'sale' : 'purchase', idx); }
     function deleteEntry(idx, type) {
-      if (!verifyDeletePassword(type === 'sales' ? 'Sale invoice' : 'Purchase bill')) return;
+      if (!confirm('Delete karna chahte hain?')) return;
       if (type === 'sales') store.sales.splice(idx, 1); else store.purchases.splice(idx, 1);
       saveData();
       renderTable(type);
@@ -1827,26 +1759,6 @@
       else { store.vendors.push(p); renderParties('vendors'); }
       saveData();
       closePartyModal();
-    }
-
-    function deleteParty(idx, type) {
-      const isCustomer = type === 'customers';
-      const party = isCustomer ? store.customers[idx] : store.vendors[idx];
-      if (!party) return;
-      if (!verifyDeletePassword(isCustomer ? 'Customer' : 'Vendor')) return;
-      if (isCustomer) {
-        store.customers.splice(idx, 1);
-        store.sales = store.sales.filter(row => row.party !== party.name);
-        renderParties('customers');
-        renderTable('sales');
-      } else {
-        store.vendors.splice(idx, 1);
-        store.purchases = store.purchases.filter(row => row.party !== party.name);
-        renderParties('vendors');
-        renderTable('purchase');
-      }
-      saveData();
-      renderDashboard();
     }
 
     function openProductModal(idx = -1) {
@@ -1884,7 +1796,7 @@
     }
 
     function deleteProduct(idx) {
-      if (!verifyDeletePassword('Product')) return;
+      if (!confirm('Product delete karna chahte hain?')) return;
       store.products.splice(idx, 1);
       saveData();
       renderProducts();
