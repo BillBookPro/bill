@@ -1330,10 +1330,17 @@ const firebaseConfig = {
       return btoa(unescape(encodeURIComponent(String(value || ''))));
     }
 
-    function verifyDeletePassword(itemLabel = 'ye item') {
-      if (!currentUser) { alert('Delete ke liye pehle login karein'); return false; }
-      return confirm(`${itemLabel} delete karna confirm karein?`);
-    }
+function verifyDeletePassword(itemLabel = 'ye item') {
+  if (!currentUser) { alert('Delete ke liye pehle login karein'); return false; }
+  const entered = prompt(`${itemLabel} delete karne ke liye apna password daalein:`);
+  if (!entered) return false;
+  const user = window._fbAuth.currentUser;
+  if (!user) return false;
+  const { signInWithEmailAndPassword } = window._fbFns;
+  return signInWithEmailAndPassword(window._fbAuth, user.email, entered)
+    .then(() => true)
+    .catch(() => { alert('Galat password! Delete nahi hua.'); return false; });
+}
 
     function isEmailJsConfigured() { return false; }
 
