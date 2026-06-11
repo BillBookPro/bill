@@ -1863,11 +1863,11 @@ function verifyDeletePassword(itemLabel = 'ye item') {
       closePartyModal();
     }
 
-    function async function deleteParty(idx, type) {
+    async function deleteParty(idx, type) {
       const isCustomer = type === 'customers';
       const party = isCustomer ? store.customers[idx] : store.vendors[idx];
       if (!party) return;
-      if if (!await verifyDeletePassword(isCustomer ? 'Customer' : 'Vendor')) return;
+      if (!await verifyDeletePassword(isCustomer ? 'Customer' : 'Vendor')) return;
       if (isCustomer) {
         store.customers.splice(idx, 1);
         store.sales = store.sales.filter(row => row.party !== party.name);
