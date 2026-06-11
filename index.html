@@ -1838,8 +1838,8 @@ function verifyDeletePassword(itemLabel = 'ye item') {
     }
 
     function editEntry(idx, type) { openModal(type === 'sales' ? 'sale' : 'purchase', idx); }
-    function deleteEntry(idx, type) {
-      if (!verifyDeletePassword(type === 'sales' ? 'Sale invoice' : 'Purchase bill')) return;
+    async function deleteEntry(idx, type) {
+    if (!await verifyDeletePassword(type === 'sales' ? 'Sale invoice' : 'Purchase bill')) return;
       if (type === 'sales') store.sales.splice(idx, 1); else store.purchases.splice(idx, 1);
       saveData();
       renderTable(type);
