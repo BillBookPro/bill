@@ -6,6 +6,80 @@
   <title>BillPro</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+
+  <!-- =============================================
+       FIREBASE SETUP — Yahan apna config daalein
+       ============================================= -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import {
+      getAuth,
+      createUserWithEmailAndPassword,
+      signInWithEmailAndPassword,
+      sendPasswordResetEmail,
+      onAuthStateChanged,
+      signOut
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import {
+      getFirestore,
+      doc,
+      setDoc,
+      getDoc,
+      onSnapshot
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    // ⬇️ APNA FIREBASE CONFIG YAHAN PASTE KAREIN
+    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyBy8UEKBowJP1Vp4QHO4asjPxmgq_UfODM",
+  authDomain: "bill-book-pro-93155.firebaseapp.com",
+  projectId: "bill-book-pro-93155",
+  storageBucket: "bill-book-pro-93155.firebasestorage.app",
+  messagingSenderId: "409759386921",
+  appId: "1:409759386921:web:886bb07870ab756ba67b38",
+  measurementId: "G-XFRTME6Z4R"
+};
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // Global references taaki baaki JS use kar sake
+    window._fbAuth = auth;
+    window._fbDb = db;
+    window._fbFns = {
+      createUserWithEmailAndPassword,
+      signInWithEmailAndPassword,
+      sendPasswordResetEmail,
+      onAuthStateChanged,
+      signOut,
+      doc,
+      setDoc,
+      getDoc,
+      onSnapshot
+    };
+
+    // Auth state listener — login/logout pe app update karo
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        currentUser = user.uid;
+        window._fbCurrentEmail = user.email;
+        // Firestore se data load karo
+        await window._fbLoadStore();
+        invoiceCounters = loadInvoiceCounters();
+        document.body.classList.remove('auth-locked');
+        document.getElementById('current-user-label').textContent = user.email;
+        updateProductList();
+        renderDashboard();
+      } else {
+        currentUser = null;
+        window._fbCurrentEmail = null;
+        store = structuredClone(defaultStore);
+        document.body.classList.add('auth-locked');
+        setAuthMode('login');
+      }
+    });
+  </script>
   <style>
     :root {
       --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -240,6 +314,56 @@
 
     .topbar h1 { font-size: 22px; font-weight: 760; letter-spacing: 0; }
     .topbar p { margin-top: 3px; font-size: 13px; color: var(--muted); }
+
+    .topbar-flag {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 96px;
+      height: 58px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid rgba(15, 35, 65, .16);
+      box-shadow: 0 12px 28px rgba(24, 34, 48, .14);
+      background: #fff;
+    }
+
+    .topbar-flag::before,
+    .topbar-flag::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 33.333%;
+    }
+
+    .topbar-flag::before {
+      top: 0;
+      background: #ff9933;
+    }
+
+    .topbar-flag::after {
+      bottom: 0;
+      background: #138808;
+    }
+
+    .chakra {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 18px;
+      height: 18px;
+      transform: translate(-50%, -50%);
+      border: 2px solid #000080;
+      border-radius: 50%;
+      background:
+        linear-gradient(0deg, transparent 45%, #000080 46%, #000080 54%, transparent 55%),
+        linear-gradient(45deg, transparent 47%, #000080 48%, #000080 52%, transparent 53%),
+        linear-gradient(90deg, transparent 45%, #000080 46%, #000080 54%, transparent 55%),
+        linear-gradient(135deg, transparent 47%, #000080 48%, #000080 52%, transparent 53%);
+      background-color: #fff;
+    }
 
     .content {
       padding: 24px 28px 34px;
@@ -883,6 +1007,7 @@
     @media (max-width: 680px) {
       .topbar { align-items: flex-start; padding: 14px 16px; }
       .topbar h1 { font-size: 19px; }
+      .topbar-flag { display: none; }
       .create-invoice-head { grid-template-columns: 1fr; }
       .bill-number { grid-template-columns: 1fr 1fr; min-width: 0; }
       .invoice-create-body { padding: 14px; }
@@ -901,19 +1026,18 @@
     <div class="auth-card">
       <div class="logo"><span class="logo-mark"><i class="ti ti-receipt-2"></i></span>Bill<span>Pro</span></div>
       <h1 id="auth-title">Login</h1>
-      <p id="auth-copy">Apna username aur password daal kar billing app open karein.</p>
-      <div class="form-group"><label>Login ID</label><input type="text" id="auth-user" autocomplete="username" placeholder="e.g. shopadmin"></div>
-      <div class="form-group" id="auth-email-row" style="display:none"><label>Email</label><input type="email" id="auth-email" autocomplete="email" placeholder="name@example.com"></div>
-      <div class="form-group" id="auth-question-row" style="display:none"><label>Secret Question</label><select id="auth-question"><option value="school">Aapke first school ka naam?</option><option value="city">Aapka birth city?</option><option value="teacher">Aapke favourite teacher ka naam?</option><option value="pet">Aapke first pet ka naam?</option><option value="mother">Mother ka maiden name?</option></select></div>
+      <p id="auth-copy">Email aur password se login karein.</p>
+      <div class="form-group" id="auth-email-row"><label>Email</label><input type="email" id="auth-email" autocomplete="email" placeholder="name@example.com"></div>
+      <div class="form-group" id="auth-question-row" style="display:none"><label>Secret Question</label><select id="auth-question"></select></div>
       <div class="form-group" id="auth-answer-row" style="display:none"><label>Secret Answer</label><input type="text" id="auth-answer" autocomplete="off" placeholder="Answer"></div>
       <div class="form-group"><label>Password</label><input type="password" id="auth-pass" autocomplete="current-password" placeholder="Password"></div>
       <div class="form-group" id="auth-otp-row" style="display:none"><label>OTP</label><input type="text" id="auth-otp" inputmode="numeric" placeholder="6 digit OTP"></div>
       <div class="auth-actions">
         <button class="btn primary" id="auth-main-btn" onclick="login()">Login</button>
-        <button class="btn" id="auth-switch-btn" onclick="setAuthMode('signup')">Create ID</button>
+        <button class="btn" id="auth-switch-btn" onclick="setAuthMode('signup')">Naya Account</button>
       </div>
-      <button class="link-btn" id="forgot-btn" style="margin-top:12px" onclick="setAuthMode('forgot')">Forgot password?</button>
-      <div class="auth-hint">GitHub Pages par ye basic browser login hai. Real secure multi-user login ke liye Firebase/Supabase ya backend connect karna padega.</div>
+      <button class="link-btn" id="forgot-btn" style="margin-top:12px" onclick="setAuthMode('forgot')">Password bhool gaye?</button>
+      <div class="auth-hint">🔥 Firebase se powered — data cloud mein save hoga, kisi bhi device se access kar saktein hain.</div>
     </div>
   </section>
 
@@ -943,6 +1067,7 @@
           <h1 id="page-title">Dashboard</h1>
           <p id="page-subtitle">Business ka quick snapshot</p>
         </div>
+        <div class="topbar-flag" title="Tricolor"><span class="chakra"></span></div>
         <div style="display:flex;align-items:center;gap:10px">
           <span class="user-pill"><i class="ti ti-user-circle"></i><span id="current-user-label"></span></span>
           <button class="btn sm" onclick="logout()"><i class="ti ti-logout"></i>Logout</button>
@@ -1147,12 +1272,8 @@
     let activeLedgerCustomer = '';
     let activeInvoice = null;
 
-    const AUTH_USERS_KEY = 'billpro-users-v1';
-    const AUTH_SESSION_KEY = 'billpro-current-user-v1';
-    const EMAILJS_PUBLIC_KEY = 'PASTE_EMAILJS_PUBLIC_KEY';
-    const EMAILJS_SERVICE_ID = 'PASTE_EMAILJS_SERVICE_ID';
-    const EMAILJS_TEMPLATE_ID = 'PASTE_EMAILJS_TEMPLATE_ID';
-    let currentUser = null;
+    // Firebase auth use hogi — localStorage auth hata di
+    let currentUser = null;  // ab Firebase UID hoga
     let authMode = 'login';
     let resetOtp = null;
     let resetOtpUser = null;
@@ -1173,21 +1294,29 @@
     let store = loadSavedStore();
     let invoiceCounters = { sale: 1, purchase: 1 };
 
-    function readUsers() {
+    // Firebase Firestore mein data save karo
+    window._fbLoadStore = async function() {
       try {
-        return JSON.parse(localStorage.getItem(AUTH_USERS_KEY) || '{}');
-      } catch (error) {
-        return {};
+        const { doc, getDoc } = window._fbFns;
+        const ref = doc(window._fbDb, 'users', currentUser);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const parsed = snap.data();
+          store = removeDemoData({
+            sales: Array.isArray(parsed.sales) ? parsed.sales : [],
+            purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
+            customers: Array.isArray(parsed.customers) ? parsed.customers : [],
+            vendors: Array.isArray(parsed.vendors) ? parsed.vendors : [],
+            products: Array.isArray(parsed.products) ? parsed.products : []
+          });
+        } else {
+          store = structuredClone(defaultStore);
+        }
+      } catch (e) {
+        console.warn('Firebase se data load nahi hua:', e);
+        store = structuredClone(defaultStore);
       }
-    }
-
-    function writeUsers(users) {
-      localStorage.setItem(AUTH_USERS_KEY, JSON.stringify(users));
-    }
-
-    function storageKey() {
-      return currentUser ? `billpro-data-v1:${currentUser}` : 'billpro-data-v1:guest';
-    }
+    };
 
     function normalizeLoginId(value) {
       return String(value || '').trim().toLowerCase().replace(/\s+/g, '-');
@@ -1201,152 +1330,112 @@
       return btoa(unescape(encodeURIComponent(String(value || ''))));
     }
 
-    function isEmailJsConfigured() {
-      return ![EMAILJS_PUBLIC_KEY, EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID].some(v => String(v).startsWith('PASTE_'));
+    function verifyDeletePassword(itemLabel = 'ye item') {
+      if (!currentUser) { alert('Delete ke liye pehle login karein'); return false; }
+      return confirm(`${itemLabel} delete karna confirm karein?`);
     }
+
+    function isEmailJsConfigured() { return false; }
 
     function setAuthMode(mode) {
       authMode = mode;
       const isSignup = mode === 'signup';
       const isForgot = mode === 'forgot';
-      resetOtp = null;
-      resetOtpUser = null;
-      resetOtpExpiresAt = 0;
-      document.getElementById('auth-title').textContent = isForgot ? 'Reset Password' : (isSignup ? 'Create Login ID' : 'Login');
-      document.getElementById('auth-copy').textContent = isForgot ? 'Login ID, same secret question ka answer, aur naya password daalein.' : (isSignup ? 'Login ID, secret question aur password bana kar app start karein.' : 'Apna username aur password daal kar billing app open karein.');
-      document.getElementById('auth-main-btn').textContent = isForgot ? 'Reset Password' : (isSignup ? 'Create Account' : 'Login');
+      resetOtp = null; resetOtpUser = null; resetOtpExpiresAt = 0;
+      document.getElementById('auth-title').textContent = isForgot ? 'Password Reset' : (isSignup ? 'Account Banayein' : 'Login');
+      document.getElementById('auth-copy').textContent = isForgot
+        ? 'Apni registered email daalein — reset link bheja jayega.'
+        : (isSignup ? 'Email aur password daalein, naya account banega.' : 'Email aur password se login karein.');
+      document.getElementById('auth-main-btn').textContent = isForgot ? 'Reset Link Bhejein' : (isSignup ? 'Account Banayein' : 'Login');
       document.getElementById('auth-main-btn').setAttribute('onclick', isForgot ? 'resetPassword()' : (isSignup ? 'createAccount()' : 'login()'));
-      document.getElementById('auth-switch-btn').textContent = (isSignup || isForgot) ? 'Back to Login' : 'Create ID';
+      document.getElementById('auth-switch-btn').textContent = (isSignup || isForgot) ? 'Login par Wapas' : 'Naya Account';
       document.getElementById('auth-switch-btn').setAttribute('onclick', (isSignup || isForgot) ? "setAuthMode('login')" : "setAuthMode('signup')");
       document.getElementById('forgot-btn').style.display = isForgot ? 'none' : 'inline-flex';
-      document.getElementById('auth-email-row').style.display = isSignup ? 'flex' : 'none';
-      document.getElementById('auth-question-row').style.display = (isSignup || isForgot) ? 'flex' : 'none';
-      document.getElementById('auth-answer-row').style.display = (isSignup || isForgot) ? 'flex' : 'none';
+      // Firebase me username nahi, email use hogi — question/answer rows hide karo
+      document.getElementById('auth-email-row').style.display = 'flex';
+      document.getElementById('auth-question-row').style.display = 'none';
+      document.getElementById('auth-answer-row').style.display = 'none';
       document.getElementById('auth-otp-row').style.display = 'none';
-      document.getElementById('auth-otp').value = '';
-      document.getElementById('auth-pass').placeholder = isForgot ? 'New password' : 'Password';
+      if (document.getElementById('auth-otp')) document.getElementById('auth-otp').value = '';
+      document.getElementById('auth-pass').placeholder = isForgot ? '' : 'Password';
+      document.getElementById('auth-pass').style.display = isForgot ? 'none' : 'block';
     }
 
-    function createAccount() {
-      const username = normalizeLoginId(document.getElementById('auth-user').value);
+    async function createAccount() {
       const email = document.getElementById('auth-email').value.trim().toLowerCase();
-      const secretQuestion = document.getElementById('auth-question').value;
-      const secretAnswer = normalizeAnswer(document.getElementById('auth-answer').value);
       const password = document.getElementById('auth-pass').value;
-      if (!username || !secretQuestion || !secretAnswer || !password) { alert('Login ID, secret question answer aur password daalein'); return; }
-      const users = readUsers();
-      if (users[username]) { alert('Ye login ID pehle se bana hua hai'); return; }
-      users[username] = { email, secretQuestion, secretAnswer: encodePassword(secretAnswer), password: encodePassword(password), createdAt: new Date().toISOString() };
-      writeUsers(users);
-      openAppForUser(username);
+      if (!email || !password) { alert('Email aur password daalein'); return; }
+      try {
+        await window._fbFns.createUserWithEmailAndPassword(window._fbAuth, email, password);
+        // onAuthStateChanged automatically app open karega
+      } catch (e) {
+        const msgs = {
+          'auth/email-already-in-use': 'Ye email pehle se registered hai. Login karein.',
+          'auth/weak-password': 'Password kam se kam 6 characters ka hona chahiye.',
+          'auth/invalid-email': 'Email sahi format mein daalein.'
+        };
+        alert(msgs[e.code] || ('Account nahi bana: ' + e.message));
+      }
     }
 
-    function login() {
-      const username = normalizeLoginId(document.getElementById('auth-user').value);
+    async function login() {
+      const email = document.getElementById('auth-email').value.trim().toLowerCase();
       const password = document.getElementById('auth-pass').value;
-      const users = readUsers();
-      if (!users[username] || users[username].password !== encodePassword(password)) {
-        alert('Login ID ya password galat hai');
-        return;
+      if (!email || !password) { alert('Email aur password daalein'); return; }
+      try {
+        await window._fbFns.signInWithEmailAndPassword(window._fbAuth, email, password);
+        // onAuthStateChanged automatically app open karega
+      } catch (e) {
+        const msgs = {
+          'auth/user-not-found': 'Ye email registered nahi hai.',
+          'auth/wrong-password': 'Password galat hai.',
+          'auth/invalid-credential': 'Email ya password galat hai.',
+          'auth/too-many-requests': 'Zyada attempts. Thodi der baad try karein.'
+        };
+        alert(msgs[e.code] || ('Login nahi hua: ' + e.message));
       }
-      openAppForUser(username);
     }
 
     function openAppForUser(username) {
-      currentUser = username;
-      store = loadSavedStore();
-      invoiceCounters = loadInvoiceCounters();
-      saveData();
-      initAuth();
-      updateProductList();
-      renderDashboard();
+      // Backward compat — nahi use hota ab
     }
 
     async function sendResetOtp() {
-      const username = normalizeLoginId(document.getElementById('auth-user').value);
-      const users = readUsers();
-      if (!users[username]) { alert('Ye login ID nahi mila'); return; }
-      if (!users[username].email) { alert('Is login ID me email saved nahi hai. Naya account email ke saath banayein.'); return; }
-      if (!isEmailJsConfigured()) {
-        alert('Email OTP bhejne ke liye pehle EmailJS public key, service ID aur template ID file me set karein.');
-        return;
-      }
-      resetOtp = String(Math.floor(100000 + Math.random() * 900000));
-      resetOtpUser = username;
-      resetOtpExpiresAt = Date.now() + 10 * 60 * 1000;
+      // Firebase mein ye function call nahi hota — resetPassword directly bhejta hai
+      await resetPassword();
+    }
+
+    async function resetPassword() {
+      const email = document.getElementById('auth-email').value.trim().toLowerCase();
+      if (!email) { alert('Apni registered email daalein'); return; }
       try {
-        emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
-        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-          to_email: users[username].email,
-          to_name: username,
-          otp: resetOtp,
-          app_name: 'BillPro'
-        });
-        document.getElementById('auth-copy').textContent = `OTP ${users[username].email} par bhej diya gaya. OTP aur naya password daalein.`;
-        document.getElementById('auth-otp-row').style.display = 'flex';
-        document.getElementById('auth-pass').value = '';
-        document.getElementById('auth-pass').placeholder = 'New password';
-        document.getElementById('auth-main-btn').textContent = 'Reset Password';
-        document.getElementById('auth-main-btn').setAttribute('onclick', 'resetPassword()');
-      } catch (error) {
-        console.error(error);
-        alert('OTP email send nahi ho paya. EmailJS settings check karein.');
+        await window._fbFns.sendPasswordResetEmail(window._fbAuth, email);
+        alert('Password reset link aapki email par bhej diya gaya. Inbox check karein.');
+        setAuthMode('login');
+      } catch (e) {
+        alert('Reset link nahi bheja ja saka: ' + e.message);
       }
     }
 
-    function resetPassword() {
-      const username = normalizeLoginId(document.getElementById('auth-user').value);
-      const password = document.getElementById('auth-pass').value;
-      const secretQuestion = document.getElementById('auth-question').value;
-      const secretAnswer = normalizeAnswer(document.getElementById('auth-answer').value);
-      if (!username || !secretQuestion || !secretAnswer || !password) { alert('Login ID, secret answer aur naya password daalein'); return; }
-      const users = readUsers();
-      if (!users[username]) { alert('Ye login ID nahi mila'); return; }
-      if (users[username].secretQuestion !== secretQuestion || users[username].secretAnswer !== encodePassword(secretAnswer)) {
-        alert('Secret question ya answer galat hai');
-        return;
-      }
-      users[username].password = encodePassword(password);
-      users[username].updatedAt = new Date().toISOString();
-      writeUsers(users);
-      alert('Password reset ho gaya. Ab login karein.');
-      document.getElementById('auth-pass').value = '';
-      document.getElementById('auth-answer').value = '';
-      document.getElementById('auth-pass').placeholder = 'Password';
-      setAuthMode('login');
-    }
-
-    function logout() {
-      location.reload();
+    async function logout() {
+      await window._fbFns.signOut(window._fbAuth);
     }
 
     function initAuth() {
+      // Firebase onAuthStateChanged se handle hota hai — yahan sirf initial state set karo
       if (!currentUser) {
         document.body.classList.add('auth-locked');
         setAuthMode('login');
         return false;
       }
       document.body.classList.remove('auth-locked');
-      document.getElementById('current-user-label').textContent = currentUser;
+      document.getElementById('current-user-label').textContent = window._fbCurrentEmail || currentUser;
       return true;
     }
 
     function loadSavedStore() {
-      try {
-        const saved = localStorage.getItem(storageKey());
-        if (!saved) return structuredClone(defaultStore);
-        const parsed = JSON.parse(saved);
-        return removeDemoData({
-          sales: Array.isArray(parsed.sales) ? parsed.sales : structuredClone(defaultStore.sales),
-          purchases: Array.isArray(parsed.purchases) ? parsed.purchases : structuredClone(defaultStore.purchases),
-          customers: Array.isArray(parsed.customers) ? parsed.customers : structuredClone(defaultStore.customers),
-          vendors: Array.isArray(parsed.vendors) ? parsed.vendors : structuredClone(defaultStore.vendors),
-          products: Array.isArray(parsed.products) ? parsed.products : structuredClone(defaultStore.products)
-        });
-      } catch (error) {
-        console.warn('Saved data load nahi ho paya, default data use ho raha hai.', error);
-        return structuredClone(defaultStore);
-      }
+      // Firebase async load — window._fbLoadStore() use hota hai
+      return structuredClone(defaultStore);
     }
 
     function removeDemoData(data) {
@@ -1358,8 +1447,15 @@
       return data;
     }
 
-    function saveData() {
-      localStorage.setItem(storageKey(), JSON.stringify({ ...store, invoiceCounters }));
+    async function saveData() {
+      if (!currentUser || !window._fbDb) return;
+      try {
+        const { doc, setDoc } = window._fbFns;
+        const ref = doc(window._fbDb, 'users', currentUser);
+        await setDoc(ref, { ...store, invoiceCounters }, { merge: true });
+      } catch (e) {
+        console.warn('Firestore mein save nahi hua:', e);
+      }
     }
 
     function getNextCounter(prefix, rows) {
@@ -1371,10 +1467,6 @@
     }
 
     function loadInvoiceCounters() {
-      try {
-        const saved = JSON.parse(localStorage.getItem(storageKey()) || '{}');
-        if (saved.invoiceCounters?.sale && saved.invoiceCounters?.purchase) return saved.invoiceCounters;
-      } catch (error) {}
       return {
         sale: getNextCounter('INV-', store.sales),
         purchase: getNextCounter('PUR-', store.purchases)
@@ -1457,11 +1549,14 @@
       const data = isC ? store.customers : store.vendors;
       const tbody = document.getElementById(type + '-tbody');
       const bills = isC ? store.sales : store.purchases;
-      if (!data.length) { tbody.innerHTML = `<tr><td colspan="${isC ? 7 : 6}" class="empty">Koi ${isC ? 'customer' : 'vendor'} nahi. Abhi add karein.</td></tr>`; return; }
+      if (!data.length) { tbody.innerHTML = `<tr><td colspan="7" class="empty">Koi ${isC ? 'customer' : 'vendor'} nahi. Abhi add karein.</td></tr>`; return; }
       tbody.innerHTML = data.map((p, i) => {
         const related = bills.filter(b => b.party === p.name);
         const total = related.reduce((a, b) => a + calcTotals(b.items).total, 0);
-        return `<tr><td>${i + 1}</td><td class="cell-strong">${p.name}</td><td>${p.phone || '-'}</td><td>${p.gstin || '-'}</td><td>${related.length}</td><td class="cell-strong">${fmt(total)}</td>${isC ? `<td><button class="btn sm" onclick="openCustomerLedgerByIndex(${i})"><i class="ti ti-eye"></i>View</button></td>` : ''}</tr>`;
+        const actions = isC
+          ? `<button class="btn sm" onclick="openCustomerLedgerByIndex(${i})"><i class="ti ti-eye"></i>View</button> <button class="btn sm icon danger" title="Delete" onclick="deleteParty(${i},'customers')"><i class="ti ti-trash"></i></button>`
+          : `<button class="btn sm icon danger" title="Delete" onclick="deleteParty(${i},'vendors')"><i class="ti ti-trash"></i></button>`;
+        return `<tr><td>${i + 1}</td><td class="cell-strong">${p.name}</td><td>${p.phone || '-'}</td><td>${p.gstin || '-'}</td><td>${related.length}</td><td class="cell-strong">${fmt(total)}</td><td>${actions}</td></tr>`;
       }).join('');
     }
 
@@ -1737,7 +1832,7 @@
 
     function editEntry(idx, type) { openModal(type === 'sales' ? 'sale' : 'purchase', idx); }
     function deleteEntry(idx, type) {
-      if (!confirm('Delete karna chahte hain?')) return;
+      if (!verifyDeletePassword(type === 'sales' ? 'Sale invoice' : 'Purchase bill')) return;
       if (type === 'sales') store.sales.splice(idx, 1); else store.purchases.splice(idx, 1);
       saveData();
       renderTable(type);
@@ -1759,6 +1854,26 @@
       else { store.vendors.push(p); renderParties('vendors'); }
       saveData();
       closePartyModal();
+    }
+
+    function deleteParty(idx, type) {
+      const isCustomer = type === 'customers';
+      const party = isCustomer ? store.customers[idx] : store.vendors[idx];
+      if (!party) return;
+      if (!verifyDeletePassword(isCustomer ? 'Customer' : 'Vendor')) return;
+      if (isCustomer) {
+        store.customers.splice(idx, 1);
+        store.sales = store.sales.filter(row => row.party !== party.name);
+        renderParties('customers');
+        renderTable('sales');
+      } else {
+        store.vendors.splice(idx, 1);
+        store.purchases = store.purchases.filter(row => row.party !== party.name);
+        renderParties('vendors');
+        renderTable('purchase');
+      }
+      saveData();
+      renderDashboard();
     }
 
     function openProductModal(idx = -1) {
@@ -1796,7 +1911,7 @@
     }
 
     function deleteProduct(idx) {
-      if (!confirm('Product delete karna chahte hain?')) return;
+      if (!verifyDeletePassword('Product')) return;
       store.products.splice(idx, 1);
       saveData();
       renderProducts();
@@ -1813,10 +1928,9 @@
       if (e.key === 'Escape') { closeModal(); closePartyModal(); closeProductModal(); closeCustomerLedger(); closeInvoiceView(); }
     });
 
-    if (initAuth()) {
-      updateProductList();
-      renderDashboard();
-    }
+    // Firebase onAuthStateChanged se app load hoga — yahan sirf initial auth-locked state set karo
+    document.body.classList.add('auth-locked');
+    if (typeof setAuthMode === 'function') setAuthMode('login');
   </script>
 </body>
 </html>
