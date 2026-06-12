@@ -1837,7 +1837,13 @@ function verifyDeletePassword(itemLabel = 'ye item') {
       if (activeLedgerCustomer) renderCustomerLedger();
     }
 
-    function editEntry(idx, type) { openModal(type === 'sales' ? 'sale' : 'purchase', idx); }
+    async function editEntry(idx, type) {
+  if (!await verifyDeletePassword(
+      type === 'sales' ? 'Sale Invoice' : 'Purchase Bill'
+  )) return;
+
+  openModal(type === 'sales' ? 'sale' : 'purchase', idx);
+}
     async function deleteEntry(idx, type) {
     if (!await verifyDeletePassword(type === 'sales' ? 'Sale invoice' : 'Purchase bill')) return;
       if (type === 'sales') store.sales.splice(idx, 1); else store.purchases.splice(idx, 1);
