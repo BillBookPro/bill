@@ -1910,18 +1910,49 @@ function verifyDeletePassword(itemLabel = 'ye item') {
       renderDashboard();
     }
 
-    function openProductModal(idx = -1) {
-      editProductIndex = idx;
-      document.getElementById('product-modal-title').textContent = idx >= 0 ? 'Edit Product' : 'Add Product';
-      const p = idx >= 0 ? store.products[idx] : { name: '', unit: 'pcs', salePrice: '', purchasePrice: '', gst: 18, stock: 0 };
-      document.getElementById('pr-name').value = p.name || '';
-      document.getElementById('pr-unit').value = p.unit || 'pcs';
-      document.getElementById('pr-sale').value = p.salePrice ?? '';
-      document.getElementById('pr-purchase').value = p.purchasePrice ?? '';
-      document.getElementById('pr-gst').value = p.gst ?? 18;
-      document.getElementById('pr-stock').value = p.stock ?? 0;
-      document.getElementById('product-modal').classList.add('open');
+    async function openProductModal(idx = -1) {
+
+  if (idx >= 0) {
+    if (!currentUser) {
+      alert('Edit ke liye pehle login karein');
+      return;
     }
+
+    const entered = prompt('Product edit karne ke liye password dalo');
+    if (!entered) return;
+
+    const user = window._fbAuth.currentUser;
+    const { signInWithEmailAndPassword } = window._fbFns;
+
+    try {
+      await signInWithEmailAndPassword(
+        window._fbAuth,
+        user.email,
+        entered
+      );
+    } catch (e) {
+      alert('Galat password! Product edit nahi hoga.');
+      return;
+    }
+  }
+
+  editProductIndex = idx;
+  document.getElementById('product-modal-title').textContent =
+    idx >= 0 ? 'Edit Product' : 'Add Product';
+
+  const p = idx >= 0
+    ? store.products[idx]
+    : { name: '', unit: 'pcs', salePrice: '', purchasePrice: '', gst: 18, stock: 0 };
+
+  document.getElementById('pr-name').value = p.name || '';
+  document.getElementById('pr-unit').value = p.unit || 'pcs';
+  document.getElementById('pr-sale').value = p.salePrice ?? '';
+  document.getElementById('pr-purchase').value = p.purchasePrice ?? '';
+  document.getElementById('pr-gst').value = p.gst ?? 18;
+  document.getElementById('pr-stock').value = p.stock ?? 0;
+
+  document.getElementById('product-modal').classList.add('open');
+}
 
     function closeProductModal() { document.getElementById('product-modal').classList.remove('open'); }
 
