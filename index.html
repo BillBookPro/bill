@@ -1837,19 +1837,34 @@ function verifyDeletePassword(itemLabel = 'ye item') {
       if (activeLedgerCustomer) renderCustomerLedger();
     }
 
-    ```javascript async function editEntry(idx, type) { if (!currentUser) { alert('Edit ke liye pehle login karein'); return; }
+   async function editEntry(idx, type) {
+  if (!currentUser) {
+    alert('Edit ke liye pehle login karein');
+    return;
+  }
 
-const entered = prompt( `${type === 'sales' ? 'Sale Invoice' : 'Purchase Bill'} edit karne ke liye password dalo` );
+  const entered = prompt(
+    `${type === 'sales' ? 'Sale Invoice' : 'Purchase Bill'} edit karne ke liye password dalo`
+  );
 
-if (!entered) return;
+  if (!entered) return;
 
-const user = window._fbAuth.currentUser; const { signInWithEmailAndPassword } = window._fbFns;
+  const user = window._fbAuth.currentUser;
+  const { signInWithEmailAndPassword } = window._fbFns;
 
-try { await signInWithEmailAndPassword(window._fbAuth, user.email, entered);
+  try {
+    await signInWithEmailAndPassword(
+      window._fbAuth,
+      user.email,
+      entered
+    );
 
-// password sahi hai → edit modal kholo openModal(type === 'sales' ? 'sale' : 'purchase', idx);
+    openModal(type === 'sales' ? 'sale' : 'purchase', idx);
 
-} catch (e) { alert('Galat password! Edit nahi hoga.'); } } ```
+  } catch (e) {
+    alert('Galat password! Edit nahi hoga.');
+  }
+}
     async function deleteEntry(idx, type) {
     if (!await verifyDeletePassword(type === 'sales' ? 'Sale invoice' : 'Purchase bill')) return;
       if (type === 'sales') store.sales.splice(idx, 1); else store.purchases.splice(idx, 1);
