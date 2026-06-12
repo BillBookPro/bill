@@ -1019,6 +1019,27 @@ const firebaseConfig = {
       .modal-footer { flex-direction: column-reverse; }
       .modal-footer .btn { width: 100%; }
     }
+    .live-header-clock{
+    position:absolute;
+    left:50%;
+    top:50%;
+    transform:translate(-50%,-50%);
+    text-align:center;
+}
+
+#liveTime{
+    font-size:34px;
+    font-weight:900;
+    color:#1663a6;
+    line-height:1;
+}
+
+#liveDate{
+    font-size:14px;
+    font-weight:600;
+    color:#666;
+    margin-top:6px;
+}
   </style>
 </head>
 <body class="auth-locked">
@@ -1067,7 +1088,10 @@ const firebaseConfig = {
           <h1 id="page-title">DASHBOARS</h1>
           <p id="page-subtitle"<b>Business Performance Overview</b></p>
         </div>
-      
+      <div class="live-header-clock">
+    <div id="liveTime"></div>
+    <div id="liveDate"></div>
+</div>
         <div style="display:flex;align-items:center;gap:10px">
           <span class="user-pill"><i class="ti ti-user-circle"></i><span id="current-user-label"></span></span>
           <button class="btn sm" onclick="logout()"><i class="ti ti-logout"></i>Logout</button>
@@ -1994,6 +2018,23 @@ function verifyDeletePassword(itemLabel = 'ye item') {
     // Firebase onAuthStateChanged se app load hoga — yahan sirf initial auth-locked state set karo
     document.body.classList.add('auth-locked');
     if (typeof setAuthMode === 'function') setAuthMode('login');
+ function updateHeaderClock(){
+    const now = new Date();
+
+    document.getElementById("liveTime").innerHTML =
+        now.toLocaleTimeString();
+
+    document.getElementById("liveDate").innerHTML =
+        now.toLocaleDateString('en-IN',{
+            weekday:'short',
+            day:'2-digit',
+            month:'short',
+            year:'numeric'
+        });
+}
+
+setInterval(updateHeaderClock,1000);
+updateHeaderClock();
   </script>
 </body>
 </html>
