@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BillPro</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -15,14 +14,18 @@
       signInWithEmailAndPassword,
       sendPasswordResetEmail,
       onAuthStateChanged,
-      signOut
+      signOut,
+      updatePassword
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
     import {
       getFirestore,
       doc,
       setDoc,
       getDoc,
-      onSnapshot
+      onSnapshot,
+      collection,
+      getDocs,
+      deleteDoc
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
     const firebaseConfig = {
@@ -37,7 +40,7 @@
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    const db = getFirestore(app);	
+    const db = getFirestore(app);
 
     window._fbAuth = auth;
     window._fbDb = db;
@@ -47,24 +50,69 @@
       sendPasswordResetEmail,
       onAuthStateChanged,
       signOut,
+      updatePassword,
       doc,
       setDoc,
       getDoc,
-      onSnapshot
+      onSnapshot,
+      collection,
+      getDocs,
+      deleteDoc
     };
 
     onAuthStateChanged(auth, async (user) => {
       if (user) {
         currentUser = user.uid;
         window._fbCurrentEmail = user.email;
+
+        // Load user profile to check role
+        const { doc, getDoc } = window._fbFns;
+        const profileRef = doc(db, 'profiles', user.uid);
+        const profileSnap = await getDoc(profileRef);
+
+        if (profileSnap.exists()) {
+          const profile = profileSnap.data();
+
+          // ===== BLOCKED CHECK =====
+          if (profile.blocked === true) {
+            await auth.signOut();
+            alert('⛔ Aapka account block kar diya gaya hai. Admin se sampark karein.');
+            return;
+          }
+
+          currentRole = profile.role || 'employee';
+          currentAdminUid = profile.adminUid || user.uid;
+          currentUserName = profile.name || user.email;
+        } else {
+          // First time user - set as admin
+          currentRole = 'admin';
+          currentAdminUid = user.uid;
+          currentUserName = user.email;
+          await window._fbFns.setDoc(profileRef, {
+            role: 'admin',
+            adminUid: user.uid,
+            email: user.email,
+            name: user.email,
+            blocked: false,
+            createdAt: new Date().toISOString()
+          });
+        }
+
+        // Data load - employees use admin's data store
         await window._fbLoadStore();
         invoiceCounters = loadInvoiceCounters();
         document.body.classList.remove('auth-locked');
-        document.getElementById('current-user-label').textContent = user.email;
+        document.getElementById('current-user-label').textContent = currentUserName;
+        document.getElementById('current-role-badge').textContent = currentRole === 'admin' ? '👑 Admin' : '👤 Employee';
+        document.getElementById('current-role-badge').style.background = currentRole === 'admin' ? '#dff0ff' : '#f0fdf4';
+        document.getElementById('current-role-badge').style.color = currentRole === 'admin' ? '#0d5f9d' : '#15803d';
+        applyRoleUI();
         updateProductList();
-        renderDashboard();
+        if (isAdmin()) renderDashboard();
       } else {
         currentUser = null;
+        currentRole = null;
+        currentAdminUid = null;
         window._fbCurrentEmail = null;
         store = structuredClone(defaultStore);
         document.body.classList.add('auth-locked');
@@ -99,6 +147,7 @@
     button { border: 0; }
     body.auth-locked .app { display: none; }
 
+    /* ===== AUTH ===== */
     .auth-screen {
       min-height: 100vh;
       display: grid;
@@ -153,6 +202,14 @@
     .auth-actions .btn { flex: 1; }
     .auth-hint { margin-top: 14px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 
+    /* ===== ROLE BADGE ===== */
+    .role-badge {
+      display: inline-flex; align-items: center;
+      padding: 4px 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 750;
+      border: 1px solid var(--line);
+    }
+
     .user-pill {
       display: inline-flex; align-items: center; gap: 8px;
       min-height: 38px; padding: 7px 11px;
@@ -160,6 +217,7 @@
       background: #fff; color: var(--muted); font-size: 13px; font-weight: 750;
     }
 
+    /* ===== APP LAYOUT ===== */
     .app {
       display: grid;
       grid-template-columns: 248px minmax(0, 1fr);
@@ -193,7 +251,7 @@
     .logo span { color: var(--blue); }
     .brand small { display: block; color: #4f6480; margin-top: 5px; font-size: 12px; }
 
-    .nav { padding: 14px 12px; }
+    .nav { padding: 14px 12px; flex: 1; overflow-y: auto; }
     .nav-section { padding: 16px 10px 7px; font-size: 11px; color: #6d7f99; text-transform: uppercase; font-weight: 700; }
     .nav-item {
       width: 100%; display: flex; align-items: center; gap: 11px;
@@ -211,6 +269,7 @@
       box-shadow: 0 10px 24px rgba(22,99,166,.11);
     }
 
+    /* ===== MAIN ===== */
     .main {
       min-width: 0; display: flex; flex-direction: column;
       background:
@@ -238,6 +297,7 @@
     .page { display: none; }
     .page.active { display: block; }
 
+    /* ===== DASHBOARD ===== */
     .dashboard-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; margin-bottom: 18px; }
 
     .stat-card {
@@ -265,6 +325,7 @@
 
     .split-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 
+    /* ===== CARDS ===== */
     .card {
       background: rgba(255,255,255,.94);
       border: 1px solid rgba(22,99,166,.14);
@@ -296,6 +357,7 @@
     .search-wrap input { padding-left: 39px; }
     input:focus, select:focus, textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(22,99,166,.12); }
 
+    /* ===== BUTTONS ===== */
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: 7px;
       min-height: 40px; padding: 9px 14px;
@@ -310,9 +372,12 @@
     .btn.primary:hover { background: var(--blue-dark); border-color: var(--blue-dark); }
     .btn.danger { color: var(--red); }
     .btn.danger:hover { background: #fff1f1; border-color: #f2c2c2; }
+    .btn.success { background: #14845f; color: #fff; border-color: #14845f; }
+    .btn.success:hover { background: #0e6348; }
     .btn.sm { min-height: 32px; padding: 6px 10px; font-size: 12px; }
     .btn.icon { width: 34px; padding: 0; }
 
+    /* ===== TABLE ===== */
     .table-wrap { width: 100%; overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 720px; }
     th { text-align: left; padding: 11px 14px; color: var(--muted); font-weight: 750; border-bottom: 1px solid var(--line-soft); font-size: 12px; background: #fbfcfd; }
@@ -326,6 +391,7 @@
     .badge.pending { background: #fff4df; color: var(--amber); }
     .badge.cancelled { background: #fff0f0; color: var(--red); }
 
+    /* ===== MODALS ===== */
     .modal-bg { display: none; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; padding: 18px; background: rgba(16,24,40,.52); }
     .modal-bg.open { display: flex; }
     .modal { background: var(--panel); border-radius: var(--radius); border: 1px solid rgba(255,255,255,.5); width: 720px; max-width: 100%; max-height: 92vh; overflow: auto; box-shadow: var(--shadow); }
@@ -336,6 +402,7 @@
     .form-group { display: flex; flex-direction: column; gap: 6px; }
     .form-group label { font-size: 12px; color: var(--muted); font-weight: 720; }
 
+    /* ===== INVOICE ===== */
     .items-table { min-width: 620px; }
     .items-table th { padding: 9px 10px; }
     .items-table td { padding: 8px 10px; }
@@ -393,7 +460,7 @@
     .soft-panel.neutral { background: #f5f5f6; border-color: #f0f1f3; }
 
     .panel-label-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; color: #5b6472; font-size: 16px; font-weight: 800; }
-    .link-btn { background: transparent; color: #475467; cursor: pointer; font-weight: 800; }
+    .link-btn { background: transparent; color: #475467; cursor: pointer; font-weight: 800; border: none; }
 
     .invoice-fields { display: grid; grid-template-columns: 180px 180px minmax(260px,1fr); gap: 12px; }
     .invoice-fields .form-group label { font-size: 16px; color: #5f6671; margin-bottom: 4px; }
@@ -409,6 +476,38 @@
 
     .stock-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 
+    /* ===== EMPLOYEE MANAGEMENT ===== */
+    .emp-card {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 16px 18px;
+      display: flex; align-items: center; justify-content: space-between; gap: 14px;
+      box-shadow: 0 4px 14px rgba(24,34,48,.05);
+      margin-bottom: 10px;
+    }
+    .emp-info { display: flex; align-items: center; gap: 14px; }
+    .emp-avatar {
+      width: 42px; height: 42px; border-radius: 50%;
+      background: linear-gradient(135deg, #dff0ff, #e8f8ee);
+      display: grid; place-items: center;
+      font-size: 18px; font-weight: 800; color: var(--blue);
+      border: 2px solid rgba(22,99,166,.2);
+    }
+    .emp-name { font-weight: 760; font-size: 14px; }
+    .emp-email { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+    /* ===== EMPLOYEE RESTRICTED BANNER ===== */
+    .emp-banner {
+      background: linear-gradient(135deg, #fff8e6, #fffbf0);
+      border: 1px solid #f6c84e;
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      margin-bottom: 18px;
+      display: flex; align-items: center; gap: 10px;
+      font-size: 13px; color: #92610a;
+      font-weight: 650;
+    }
+
+    /* ===== PRINT ===== */
     @media print {
       body * { visibility: hidden; }
       #print-area, #print-area * { visibility: visible; }
@@ -417,11 +516,12 @@
       .modal, .invoice-paper { width: 100%; max-height: none; overflow: visible; border: 0; box-shadow: none; }
     }
 
+    /* ===== RESPONSIVE ===== */
     @media (max-width: 980px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid rgba(22,99,166,.18); }
       .brand { padding: 16px; }
-      .nav { display: flex; gap: 8px; overflow-x: auto; padding: 10px 12px; }
+      .nav { display: flex; gap: 8px; overflow-x: auto; padding: 10px 12px; flex: none; }
       .nav-section { display: none; }
       .nav-item { width: auto; flex: 0 0 auto; }
       .dashboard-grid, .split-grid { grid-template-columns: 1fr 1fr; }
@@ -442,6 +542,7 @@
       .invoice-head, .invoice-meta { text-align: left; }
       .modal-footer { flex-direction: column-reverse; }
       .modal-footer .btn { width: 100%; }
+      .live-header-clock { display: none; }
     }
   </style>
 </head>
@@ -453,17 +554,14 @@
       <div class="logo"><span class="logo-mark"><i class="ti ti-receipt-2"></i></span>Bill<span>Pro</span></div>
       <h1 id="auth-title">Login</h1>
       <p id="auth-copy">Email aur password se login karein.</p>
-      <div class="form-group" id="auth-email-row"><label>Email</label><input type="email" id="auth-email" autocomplete="email" placeholder="name@example.com"></div>
-      <div class="form-group" id="auth-question-row" style="display:none"><label>Secret Question</label><select id="auth-question"></select></div>
-      <div class="form-group" id="auth-answer-row" style="display:none"><label>Secret Answer</label><input type="text" id="auth-answer" autocomplete="off" placeholder="Answer"></div>
-      <div class="form-group"><label>Password</label><input type="password" id="auth-pass" autocomplete="current-password" placeholder="Password"></div>
-      <div class="form-group" id="auth-otp-row" style="display:none"><label>OTP</label><input type="text" id="auth-otp" inputmode="numeric" placeholder="6 digit OTP"></div>
+      <div class="form-group"><label>Email</label><input type="email" id="auth-email" autocomplete="email" placeholder="name@example.com"></div>
+      <div class="form-group" id="auth-pass-wrap"><label>Password</label><input type="password" id="auth-pass" autocomplete="current-password" placeholder="Password"></div>
       <div class="auth-actions">
-        <button class="btn primary" id="auth-main-btn" onclick="login()">Login</button>
+        <button class="btn primary" id="auth-main-btn" onclick="handleAuthBtn()">Login</button>
         <button class="btn" id="auth-switch-btn" onclick="setAuthMode('signup')">Naya Account</button>
       </div>
-      <button class="link-btn" id="forgot-btn" style="margin-top:12px" onclick="setAuthMode('forgot')">Password bhool gaye?</button>
-      <div class="auth-hint">🔥 Firebase se powered — data cloud mein save hoga, kisi bhi device se access kar saktein hain.</div>
+      <button class="link-btn" id="forgot-btn" style="margin-top:12px;font-size:13px" onclick="setAuthMode('forgot')">Password bhool gaye?</button>
+      <div class="auth-hint">🔥 Firebase se powered — data cloud mein save hoga.</div>
     </div>
   </section>
 
@@ -475,16 +573,23 @@
         <small>Sales, purchase aur party records</small>
       </div>
       <nav class="nav" aria-label="Main navigation">
-        <div class="nav-section">Overview</div>
-        <button class="nav-item active" onclick="showPage('dashboard',this)"><i class="ti ti-layout-dashboard"></i>Dashboard</button>
+        <!-- Admin only nav items -->
+        <div class="nav-section admin-only">Overview</div>
+        <button class="nav-item active admin-only" onclick="showPage('dashboard',this)"><i class="ti ti-layout-dashboard"></i>Dashboard</button>
+
         <div class="nav-section">Sales</div>
         <button class="nav-item" onclick="showPage('sales',this)"><i class="ti ti-file-invoice"></i>Sale Invoice</button>
-        <button class="nav-item" onclick="showPage('customers',this)"><i class="ti ti-users"></i>Customers</button>
-        <div class="nav-section">Inventory</div>
-        <button class="nav-item" onclick="showPage('products',this)"><i class="ti ti-box"></i>Products</button>
+        <button class="nav-item admin-only" onclick="showPage('customers',this)"><i class="ti ti-users"></i>Customers</button>
+
+        <div class="nav-section admin-only">Inventory</div>
+        <button class="nav-item admin-only" onclick="showPage('products',this)"><i class="ti ti-box"></i>Products</button>
+
         <div class="nav-section">Purchase</div>
         <button class="nav-item" onclick="showPage('purchase',this)"><i class="ti ti-shopping-cart"></i>Purchase Bill</button>
-        <button class="nav-item" onclick="showPage('vendors',this)"><i class="ti ti-building-store"></i>Vendors</button>
+        <button class="nav-item admin-only" onclick="showPage('vendors',this)"><i class="ti ti-building-store"></i>Vendors</button>
+
+        <div class="nav-section admin-only">Team</div>
+        <button class="nav-item admin-only" onclick="showPage('employees',this)"><i class="ti ti-users-group"></i>Employees</button>
       </nav>
     </aside>
 
@@ -498,7 +603,8 @@
           <div id="liveTime"></div>
           <div id="liveDate"></div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span id="current-role-badge" class="role-badge">👑 Admin</span>
           <span class="user-pill"><i class="ti ti-user-circle"></i><span id="current-user-label"></span></span>
           <button class="btn sm" onclick="logout()"><i class="ti ti-logout"></i>Logout</button>
         </div>
@@ -506,7 +612,7 @@
 
       <section class="content">
 
-        <!-- DASHBOARD -->
+        <!-- DASHBOARD (Admin only) -->
         <div class="page active" id="page-dashboard">
           <div class="dashboard-grid" id="dash-stats"></div>
           <div class="split-grid">
@@ -523,6 +629,10 @@
 
         <!-- SALES -->
         <div class="page" id="page-sales">
+          <div id="emp-sales-banner" class="emp-banner" style="display:none">
+            <i class="ti ti-info-circle" style="font-size:18px"></i>
+            <span>Employee Mode: Aap sirf Sale Invoice dekh aur bana sakte hain. Edit/Delete sirf Admin kar sakta hai.</span>
+          </div>
           <div class="toolbar">
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search invoices..." oninput="filterTable('sales-table',this.value)"></div>
             <button class="btn primary" onclick="openModal('sale')"><i class="ti ti-plus"></i>New Sale Invoice</button>
@@ -530,8 +640,12 @@
           <div class="card"><div class="table-wrap"><table id="sales-table"><thead><tr><th>#</th><th>Invoice No</th><th>Party Name</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead><tbody id="sales-tbody"></tbody></table></div></div>
         </div>
 
-        <!-- PURCHASE -->
+        <!-- PURCHASE (Employee can view+create, Admin can edit/delete) -->
         <div class="page" id="page-purchase">
+          <div id="emp-purchase-banner" class="emp-banner" style="display:none">
+            <i class="ti ti-info-circle" style="font-size:18px"></i>
+            <span>Employee Mode: Aap Purchase Bill dekh aur bana sakte hain. Edit/Delete sirf Admin kar sakta hai.</span>
+          </div>
           <div class="toolbar">
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search bills..." oninput="filterTable('purchase-table',this.value)"></div>
             <button class="btn primary" onclick="openModal('purchase')"><i class="ti ti-plus"></i>New Purchase Bill</button>
@@ -539,7 +653,7 @@
           <div class="card"><div class="table-wrap"><table id="purchase-table"><thead><tr><th>#</th><th>Bill No</th><th>Vendor Name</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead><tbody id="purchase-tbody"></tbody></table></div></div>
         </div>
 
-        <!-- CUSTOMERS -->
+        <!-- CUSTOMERS (Admin only) -->
         <div class="page" id="page-customers">
           <div class="toolbar">
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search customers..." oninput="filterTable('customers-table',this.value)"></div>
@@ -548,7 +662,7 @@
           <div class="card"><div class="table-wrap"><table id="customers-table"><thead><tr><th>#</th><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Amount</th><th>Actions</th></tr></thead><tbody id="customers-tbody"></tbody></table></div></div>
         </div>
 
-        <!-- PRODUCTS -->
+        <!-- PRODUCTS (Admin only) -->
         <div class="page" id="page-products">
           <div class="toolbar">
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search products..." oninput="filterTable('products-table',this.value)"></div>
@@ -557,7 +671,7 @@
           <div class="card"><div class="table-wrap"><table id="products-table"><thead><tr><th>#</th><th>Product</th><th>Unit</th><th>Sale Price</th><th>Purchase Price</th><th>GST</th><th>Stock</th><th>Actions</th></tr></thead><tbody id="products-tbody"></tbody></table></div></div>
         </div>
 
-        <!-- VENDORS -->
+        <!-- VENDORS (Admin only) -->
         <div class="page" id="page-vendors">
           <div class="toolbar">
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search vendors..." oninput="filterTable('vendors-table',this.value)"></div>
@@ -566,11 +680,22 @@
           <div class="card"><div class="table-wrap"><table id="vendors-table"><thead><tr><th>#</th><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Amount</th></tr></thead><tbody id="vendors-tbody"></tbody></table></div></div>
         </div>
 
+        <!-- EMPLOYEES (Admin only) -->
+        <div class="page" id="page-employees">
+          <div class="toolbar">
+            <div></div>
+            <button class="btn primary" onclick="openEmpModal()"><i class="ti ti-user-plus"></i>New Employee Add Karein</button>
+          </div>
+          <div id="emp-list">
+            <div class="empty">Koi employee nahi. Upar se add karein.</div>
+          </div>
+        </div>
+
       </section>
     </main>
   </div>
 
-  <!-- INVOICE MODAL -->
+  <!-- ===== INVOICE MODAL ===== -->
   <div class="modal-bg" id="invoice-modal">
     <div class="modal invoice-modal-shell">
       <div class="create-invoice-head">
@@ -595,7 +720,7 @@
           <div class="soft-panel">
             <div class="panel-label-row">
               <label id="party-label" for="f-party">Select Customer</label>
-              <button class="link-btn" onclick="openPartyModal('customer')">+ Create Customer</button>
+              <button class="link-btn admin-only" onclick="openPartyModal('customer')">+ Create Customer</button>
             </div>
             <input type="text" id="f-party" list="party-list" placeholder="Search customers...">
             <datalist id="party-list"></datalist>
@@ -613,7 +738,6 @@
         <datalist id="product-list"></datalist>
 
         <div class="product-entry">
-          <!-- Quick add row -->
           <div class="quick-add-row">
             <input type="text" placeholder="Filter Category">
             <input type="text" list="product-list" id="quick-product" placeholder="Search product...">
@@ -621,7 +745,6 @@
             <button class="btn primary" onclick="addQuickProduct()"><i class="ti ti-plus"></i>Add to Bill</button>
           </div>
 
-          <!-- Items table -->
           <div class="table-wrap">
             <table class="items-table">
               <thead>
@@ -638,15 +761,12 @@
             </table>
           </div>
 
-          <!-- Add custom item + stock chips -->
           <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
             <button class="btn sm" onclick="addItemRow()"><i class="ti ti-plus"></i>Add Custom Item</button>
           </div>
           <div class="stock-chips" id="stock-chip-list"></div>
+        </div>
 
-        </div><!-- end product-entry -->
-
-        <!-- Totals -->
         <div class="total-section" id="totals-section">
           <div class="total-row"><span>Subtotal</span><span id="t-sub">₹0</span></div>
           <div class="total-row"><span>GST</span><span id="t-gst">₹0</span></div>
@@ -664,8 +784,7 @@
           </div>
           <div></div>
         </div>
-
-      </div><!-- end invoice-create-body -->
+      </div>
     </div>
   </div>
 
@@ -734,7 +853,49 @@
     </div>
   </div>
 
+  <!-- EMPLOYEE ADD MODAL (Admin only) -->
+  <div class="modal-bg" id="emp-modal">
+    <div class="modal" style="width:480px">
+      <div class="modal-head">
+        <h2>New Employee Add Karein</h2>
+        <button class="btn sm icon" onclick="closeEmpModal()"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group" style="margin-bottom:12px">
+          <label>Employee Ka Naam</label>
+          <input type="text" id="emp-name" placeholder="Jaise: Ramesh Kumar">
+        </div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>Email (Login ID)</label>
+          <input type="email" id="emp-email" placeholder="employee@example.com">
+        </div>
+        <div class="form-group" style="margin-bottom:4px">
+          <label>Password</label>
+          <input type="text" id="emp-pass" placeholder="Minimum 6 characters">
+        </div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:14px">⚠️ Ye email aur password employee ko dein. Woh isse login karenge.</p>
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;font-size:13px;color:#15803d">
+          <strong>Employee ko milega:</strong><br>
+          ✅ Sale Invoice dekhna aur banana<br>
+          ❌ Edit / Delete nahi kar sakta<br>
+          ❌ Purchase, Products, Customers - access nahi
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeEmpModal()">Cancel</button>
+        <button class="btn primary" onclick="createEmployee()"><i class="ti ti-user-plus"></i>Employee Banayein</button>
+      </div>
+    </div>
+  </div>
+
   <script>
+  function handleAuthBtn() {
+    if (authMode === 'forgot') resetPassword();
+    else if (authMode === 'signup') createAccount();
+    else login();
+  }
+  window.handleAuthBtn = handleAuthBtn;
+    // ===== STATE =====
     let currentType = 'sale';
     let currentPartyType = 'customer';
     let editIndex = -1;
@@ -743,31 +904,62 @@
     let activeLedgerCustomer = '';
     let activeInvoice = null;
     let currentUser = null;
+    let currentRole = null;       // 'admin' or 'employee'
+    let currentAdminUid = null;   // admin's UID (employees use admin's data)
+    let currentUserName = '';
     let authMode = 'login';
-    let resetOtp = null, resetOtpUser = null, resetOtpExpiresAt = 0;
 
-    const defaultStore = { sales: [], purchases: [], customers: [], vendors: [], products: [] };
-    const demoCustomerNames = ['Rahul Enterprises','Sharma Traders','Meena Store','Gupta Electronics','Aarav Retail'];
-    const demoVendorNames = ['Tech Distributors','Mobile World'];
-    const demoProductNames = ['Laptop','Mobile','Charger','Headphones','Laptop Stock','Phones'];
-
+    const defaultStore = { sales: [], purchases: [], customers: [], vendors: [], products: [], employees: [] };
     let store = structuredClone(defaultStore);
     let invoiceCounters = { sale: 1, purchase: 1 };
 
+    // ===== ROLE HELPERS =====
+    function isAdmin() { return currentRole === 'admin'; }
+
+    function applyRoleUI() {
+      // Show/hide admin-only elements
+      document.querySelectorAll('.admin-only').forEach(el => {
+        el.style.display = isAdmin() ? '' : 'none';
+      });
+      // Employee banners
+      const salesBanner = document.getElementById('emp-sales-banner');
+      if (salesBanner) salesBanner.style.display = isAdmin() ? 'none' : 'flex';
+      const purchaseBanner = document.getElementById('emp-purchase-banner');
+      if (purchaseBanner) purchaseBanner.style.display = isAdmin() ? 'none' : 'flex';
+
+      // If employee, show sales page directly
+      if (!isAdmin()) {
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.getElementById('page-sales').classList.add('active');
+        document.getElementById('page-title').textContent = 'Sale Invoice';
+        document.getElementById('page-subtitle').textContent = 'Invoices dekhein aur naye banayein';
+        renderTable('sales');
+      } else {
+        renderDashboard();
+      }
+    }
+
+    // ===== FIREBASE DATA =====
+    // Store key: always use adminUid's data
+    function storeDocRef() {
+      const { doc } = window._fbFns;
+      return doc(window._fbDb, 'users', currentAdminUid);
+    }
+
     window._fbLoadStore = async function() {
       try {
-        const { doc, getDoc } = window._fbFns;
-        const ref = doc(window._fbDb, 'users', currentUser);
-        const snap = await getDoc(ref);
+        const { getDoc } = window._fbFns;
+        const snap = await getDoc(storeDocRef());
         if (snap.exists()) {
           const parsed = snap.data();
-          store = removeDemoData({
+          store = {
             sales: Array.isArray(parsed.sales) ? parsed.sales : [],
             purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
             customers: Array.isArray(parsed.customers) ? parsed.customers : [],
             vendors: Array.isArray(parsed.vendors) ? parsed.vendors : [],
-            products: Array.isArray(parsed.products) ? parsed.products : []
-          });
+            products: Array.isArray(parsed.products) ? parsed.products : [],
+            employees: Array.isArray(parsed.employees) ? parsed.employees : []
+          };
         } else {
           store = structuredClone(defaultStore);
         }
@@ -777,49 +969,28 @@
       }
     };
 
-    function removeDemoData(data) {
-      data.sales = data.sales.filter(r => !demoCustomerNames.includes(r.party));
-      data.purchases = data.purchases.filter(r => !demoVendorNames.includes(r.party));
-      data.customers = data.customers.filter(r => !demoCustomerNames.includes(r.name));
-      data.vendors = data.vendors.filter(r => !demoVendorNames.includes(r.name));
-      data.products = data.products.filter(r => !demoProductNames.includes(r.name));
-      return data;
-    }
-
     async function saveData() {
-      if (!currentUser || !window._fbDb) return;
+      if (!currentAdminUid || !window._fbDb) return;
       try {
-        const { doc, setDoc } = window._fbFns;
-        await setDoc(doc(window._fbDb, 'users', currentUser), { ...store, invoiceCounters }, { merge: true });
+        const { setDoc } = window._fbFns;
+        await setDoc(storeDocRef(), { ...store, invoiceCounters }, { merge: true });
       } catch(e) { console.warn('Firestore save error:', e); }
     }
 
-    async function verifyDeletePassword(itemLabel = 'ye item') {
-      if (!currentUser) { alert('Delete ke liye pehle login karein'); return false; }
-      const entered = prompt(`${itemLabel} delete karne ke liye apna password daalein:`);
-      if (!entered) return false;
-      const user = window._fbAuth.currentUser;
-      if (!user) return false;
-      return window._fbFns.signInWithEmailAndPassword(window._fbAuth, user.email, entered)
-        .then(() => true)
-        .catch(() => { alert('Galat password! Delete nahi hua.'); return false; });
-    }
-
+    // ===== AUTH =====
     function setAuthMode(mode) {
       authMode = mode;
       const isSignup = mode === 'signup', isForgot = mode === 'forgot';
       document.getElementById('auth-title').textContent = isForgot ? 'Password Reset' : (isSignup ? 'Account Banayein' : 'Login');
-      document.getElementById('auth-copy').textContent = isForgot ? 'Apni registered email daalein.' : (isSignup ? 'Email aur password daalein.' : 'Email aur password se login karein.');
+      document.getElementById('auth-copy').textContent = isForgot ? 'Registered email daalein.' : (isSignup ? 'Email aur password daalein.' : 'Email aur password se login karein.');
       document.getElementById('auth-main-btn').textContent = isForgot ? 'Reset Link Bhejein' : (isSignup ? 'Account Banayein' : 'Login');
-      document.getElementById('auth-main-btn').setAttribute('onclick', isForgot ? 'resetPassword()' : (isSignup ? 'createAccount()' : 'login()'));
+
       document.getElementById('auth-switch-btn').textContent = (isSignup || isForgot) ? 'Login par Wapas' : 'Naya Account';
       document.getElementById('auth-switch-btn').setAttribute('onclick', (isSignup || isForgot) ? "setAuthMode('login')" : "setAuthMode('signup')");
       document.getElementById('forgot-btn').style.display = isForgot ? 'none' : 'inline-flex';
-      document.getElementById('auth-question-row').style.display = 'none';
-      document.getElementById('auth-answer-row').style.display = 'none';
-      document.getElementById('auth-otp-row').style.display = 'none';
-      document.getElementById('auth-pass').style.display = isForgot ? 'none' : 'block';
+      document.getElementById('auth-pass-wrap').style.display = isForgot ? 'none' : 'flex';
     }
+    window.setAuthMode = setAuthMode;
 
     async function createAccount() {
       const email = document.getElementById('auth-email').value.trim().toLowerCase();
@@ -828,7 +999,7 @@
       try {
         await window._fbFns.createUserWithEmailAndPassword(window._fbAuth, email, password);
       } catch(e) {
-        const msgs = { 'auth/email-already-in-use': 'Ye email pehle se registered hai.', 'auth/weak-password': 'Password 6+ characters ka hona chahiye.', 'auth/invalid-email': 'Email sahi format mein daalein.' };
+        const msgs = { 'auth/email-already-in-use': 'Ye email pehle se registered hai.', 'auth/weak-password': 'Password 6+ characters ka hona chahiye.', 'auth/invalid-email': 'Email format sahi karein.' };
         alert(msgs[e.code] || 'Account nahi bana: ' + e.message);
       }
     }
@@ -840,25 +1011,183 @@
       try {
         await window._fbFns.signInWithEmailAndPassword(window._fbAuth, email, password);
       } catch(e) {
-        const msgs = { 'auth/user-not-found': 'Ye email registered nahi hai.', 'auth/wrong-password': 'Password galat hai.', 'auth/invalid-credential': 'Email ya password galat hai.', 'auth/too-many-requests': 'Zyada attempts. Thodi der baad try karein.' };
+        const msgs = { 'auth/user-not-found': 'Ye email registered nahi hai.', 'auth/wrong-password': 'Password galat hai.', 'auth/invalid-credential': 'Email ya password galat hai.', 'auth/too-many-requests': 'Zyada attempts. Baad mein try karein.' };
         alert(msgs[e.code] || 'Login nahi hua: ' + e.message);
       }
     }
 
     async function resetPassword() {
       const email = document.getElementById('auth-email').value.trim().toLowerCase();
-      if (!email) { alert('Apni registered email daalein'); return; }
+      if (!email) { alert('Email daalein'); return; }
       try {
         await window._fbFns.sendPasswordResetEmail(window._fbAuth, email);
-        alert('Password reset link bhej diya gaya. Inbox check karein.');
+        alert('Password reset link bhej diya. Inbox check karein.');
         setAuthMode('login');
       } catch(e) { alert('Reset link nahi bheja: ' + e.message); }
     }
 
     async function logout() { await window._fbFns.signOut(window._fbAuth); }
 
-    function loadSavedStore() { return structuredClone(defaultStore); }
+    // ===== EMPLOYEE MANAGEMENT =====
+    function openEmpModal() {
+      if (!isAdmin()) return;
+      document.getElementById('emp-name').value = '';
+      document.getElementById('emp-email').value = '';
+      document.getElementById('emp-pass').value = '';
+      document.getElementById('emp-modal').classList.add('open');
+    }
+    function closeEmpModal() { document.getElementById('emp-modal').classList.remove('open'); }
 
+    async function createEmployee() {
+      if (!isAdmin()) return;
+      const name = document.getElementById('emp-name').value.trim();
+      const email = document.getElementById('emp-email').value.trim().toLowerCase();
+      const pass = document.getElementById('emp-pass').value;
+
+      if (!name) { alert('Employee ka naam daalein'); return; }
+      if (!email) { alert('Email daalein'); return; }
+      if (!pass || pass.length < 6) { alert('Password minimum 6 characters ka hona chahiye'); return; }
+
+      const btn = document.querySelector('#emp-modal .btn.primary');
+      btn.textContent = 'Bana rahe hain...';
+      btn.disabled = true;
+
+      try {
+        // Save current admin info BEFORE anything changes
+        const adminEmail = window._fbCurrentEmail;
+        const adminUid   = currentUser;
+        const adminPass  = prompt('Apna Admin password confirm karein:');
+        if (!adminPass) { btn.innerHTML = '<i class="ti ti-user-plus"></i>Employee Banayein'; btn.disabled = false; return; }
+
+        // ── Step 1: Create employee Firebase Auth account ──
+        // NOTE: This auto-signs-in the employee and triggers onAuthStateChanged
+        const empCredential = await window._fbFns.createUserWithEmailAndPassword(window._fbAuth, email, pass);
+        const empUid = empCredential.user.uid;
+
+        // ── Step 2: Save employee profile in Firestore (profiles collection) ──
+        const { doc, setDoc, getDoc } = window._fbFns;
+        await setDoc(doc(window._fbDb, 'profiles', empUid), {
+          role: 'employee',
+          adminUid: adminUid,
+          email: email,
+          name: name,
+          blocked: false,
+          createdAt: new Date().toISOString(),
+          createdBy: adminUid
+        });
+
+        // ── Step 3: Re-login as admin (this will trigger onAuthStateChanged) ──
+        await window._fbFns.signInWithEmailAndPassword(window._fbAuth, adminEmail, adminPass);
+        // onAuthStateChanged will now run and load the admin's store fresh from Firestore
+
+        // ── Step 4: Wait a tick for onAuthStateChanged to finish, then add employee ──
+        // We add employee AFTER admin is logged back in so store is admin's store
+        await new Promise(resolve => setTimeout(resolve, 1200));
+
+        // ── Step 5: Add employee to admin's store and save ──
+        if (!store.employees) store.employees = [];
+        // Avoid duplicate entry
+        if (!store.employees.find(e => e.uid === empUid)) {
+          store.employees.push({ uid: empUid, name, email, blocked: false, createdAt: new Date().toISOString() });
+          await saveData();
+        }
+
+        closeEmpModal();
+        renderEmployees();
+        alert(`✅ Employee "${name}" ban gaya!\n\nLogin details:\nEmail: ${email}\nPassword: ${pass}\n\nYe details employee ko de dein.`);
+      } catch(e) {
+        const msgs = {
+          'auth/email-already-in-use': 'Ye email pehle se registered hai.',
+          'auth/weak-password': 'Password 6+ characters ka hona chahiye.',
+          'auth/invalid-email': 'Email format sahi karein.',
+          'auth/wrong-password': 'Admin password galat hai.',
+          'auth/invalid-credential': 'Admin password galat hai.'
+        };
+        alert(msgs[e.code] || 'Employee nahi bana: ' + e.message);
+      } finally {
+        btn.innerHTML = '<i class="ti ti-user-plus"></i>Employee Banayein';
+        btn.disabled = false;
+      }
+    }
+
+    function renderEmployees() {
+      if (!isAdmin()) return;
+      const list = document.getElementById('emp-list');
+      const employees = store.employees || [];
+      if (!employees.length) {
+        list.innerHTML = '<div class="empty">Abhi tak koi employee nahi. "New Employee Add Karein" se add karein.</div>';
+        return;
+      }
+      list.innerHTML = employees.map((emp, i) => {
+        const isBlocked = emp.blocked === true;
+        return `
+        <div class="emp-card" style="${isBlocked ? 'opacity:0.7;border-color:#f2c2c2;background:#fff8f8' : ''}">
+          <div class="emp-info">
+            <div class="emp-avatar" style="${isBlocked ? 'background:linear-gradient(135deg,#ffe4e4,#fff0f0);color:var(--red)' : ''}">${(emp.name||'E')[0].toUpperCase()}</div>
+            <div>
+              <div class="emp-name">${esc(emp.name)} ${isBlocked ? '<span style="font-size:11px;background:#fff0f0;color:var(--red);border:1px solid #f2c2c2;border-radius:999px;padding:2px 8px;font-weight:700">⛔ Blocked</span>' : ''}</div>
+              <div class="emp-email"><i class="ti ti-mail" style="font-size:12px"></i> ${esc(emp.email)}</div>
+              <div class="emp-email" style="margin-top:2px"><i class="ti ti-calendar" style="font-size:12px"></i> Joined: ${emp.createdAt ? new Date(emp.createdAt).toLocaleDateString('en-IN') : '-'}</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="badge" style="background:${isBlocked?'#fff0f0':'#f0fdf4'};color:${isBlocked?'var(--red)':'#15803d'};border:1px solid ${isBlocked?'#f2c2c2':'#bbf7d0'}">${isBlocked ? '⛔ Blocked' : '👤 Active'}</span>
+            <button class="btn sm ${isBlocked ? 'success' : ''}" style="${isBlocked ? '' : 'color:var(--amber);border-color:#f6c84e'}" onclick="toggleBlockEmployee(${i})">
+              <i class="ti ti-${isBlocked ? 'lock-open' : 'lock'}"></i>${isBlocked ? 'Unblock' : 'Block'}
+            </button>
+            <button class="btn sm danger" onclick="deleteEmployee(${i})"><i class="ti ti-trash"></i>Remove</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    async function toggleBlockEmployee(idx) {
+      if (!isAdmin()) return;
+      const emp = (store.employees||[])[idx];
+      if (!emp) return;
+      const nowBlocked = emp.blocked === true;
+      const action = nowBlocked ? 'unblock' : 'block';
+      if (!confirm(`"${emp.name}" ko ${action} karein?`)) return;
+
+      emp.blocked = !nowBlocked;
+      store.employees[idx] = emp;
+
+      // Also update Firestore profile so login check works
+      if (emp.uid) {
+        try {
+          const { doc, setDoc } = window._fbFns;
+          await setDoc(doc(window._fbDb, 'profiles', emp.uid), { blocked: emp.blocked }, { merge: true });
+        } catch(e) { console.warn('Profile update error:', e); }
+      }
+
+      await saveData();
+      renderEmployees();
+      alert(`✅ "${emp.name}" ko ${action} kar diya gaya.`);
+    }
+
+    async function deleteEmployee(idx) {
+      if (!isAdmin()) return;
+      const emp = (store.employees||[])[idx];
+      if (!emp) return;
+      if (!confirm(`"${emp.name}" ko remove karein? Woh login nahi kar payega.`)) return;
+      store.employees.splice(idx, 1);
+      await saveData();
+      renderEmployees();
+    }
+
+    // ===== PASSWORD VERIFY =====
+    async function verifyDeletePassword(itemLabel = 'ye item') {
+      if (!currentUser) { alert('Delete ke liye pehle login karein'); return false; }
+      const entered = prompt(`${itemLabel} delete karne ke liye apna password daalein:`);
+      if (!entered) return false;
+      const user = window._fbAuth.currentUser;
+      if (!user) return false;
+      return window._fbFns.signInWithEmailAndPassword(window._fbAuth, user.email, entered)
+        .then(() => true)
+        .catch(() => { alert('Galat password! Delete nahi hua.'); return false; });
+    }
+
+    // ===== HELPERS =====
     function getNextCounter(prefix, rows) {
       const numbers = rows.map(row => {
         const match = String(row.invoiceNo || '').match(new RegExp('^' + prefix + '0*(\\d+)$'));
@@ -870,8 +1199,6 @@
     function loadInvoiceCounters() {
       return { sale: getNextCounter('INV-', store.sales), purchase: getNextCounter('PUR-', store.purchases) };
     }
-
-    invoiceCounters = loadInvoiceCounters();
 
     function calcItem(i) {
       const qty = parseFloat(i.qty)||0, price = parseFloat(i.price)||0, gst = parseFloat(i.gst)||0;
@@ -890,13 +1217,20 @@
       return new Date(date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
     }
 
+    // ===== NAVIGATION =====
     function showPage(id, el) {
+      // Block employees from accessing restricted pages
+      const restrictedForEmployee = ['dashboard','customers','products','vendors','employees'];
+      if (!isAdmin() && restrictedForEmployee.includes(id)) {
+        alert('Aapke paas is page ka access nahi hai.');
+        return;
+      }
       document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
       document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
       document.getElementById('page-'+id).classList.add('active');
       el.classList.add('active');
-      const titles = {dashboard:'Dashboard',sales:'Sale Invoices',purchase:'Purchase Bills',customers:'Customers',products:'Products',vendors:'Vendors'};
-      const subtitles = {dashboard:'Business ka quick snapshot',sales:'Customer invoices manage karein',purchase:'Vendor bills track karein',customers:'Customer directory',products:'Product master aur rate list',vendors:'Vendor directory'};
+      const titles = {dashboard:'Dashboard',sales:'Sale Invoices',purchase:'Purchase Bills',customers:'Customers',products:'Products',vendors:'Vendors',employees:'Employees'};
+      const subtitles = {dashboard:'Business ka quick snapshot',sales:'Customer invoices manage karein',purchase:'Vendor bills track karein',customers:'Customer directory',products:'Product master aur rate list',vendors:'Vendor directory',employees:'Team manage karein'};
       document.getElementById('page-title').textContent = titles[id];
       document.getElementById('page-subtitle').textContent = subtitles[id];
       if (id==='dashboard') renderDashboard();
@@ -905,8 +1239,10 @@
       if (id==='customers') renderParties('customers');
       if (id==='products') renderProducts();
       if (id==='vendors') renderParties('vendors');
+      if (id==='employees') renderEmployees();
     }
 
+    // ===== DASHBOARD =====
     function renderDashboard() {
       const sTotal = store.sales.reduce((a,s)=>a+calcTotals(s.items).total,0);
       const pTotal = store.purchases.reduce((a,p)=>a+calcTotals(p.items).total,0);
@@ -923,21 +1259,29 @@
 
     function badge(s) { return `<span class="badge ${s}">${s.charAt(0).toUpperCase()+s.slice(1)}</span>`; }
 
+    // ===== TABLES =====
     function renderTable(type) {
-      const data = store[type==='sales'?'sales':'purchases'];
+      const data = type==='sales' ? store.sales : store.purchases;
       const tbody = document.getElementById(type==='sales'?'sales-tbody':'purchase-tbody');
       if (!data.length) { tbody.innerHTML=`<tr><td colspan="8" class="empty">Koi entry nahi. Naya ${type==='sales'?'Invoice':'Bill'} banayein.</td></tr>`; return; }
       tbody.innerHTML = data.map((r,i) => {
         const t = calcTotals(r.items);
+        // Employee: only view button, no edit/delete
+        let actions = '';
+        if (isAdmin()) {
+          actions = `
+            <button class="btn sm icon" title="View" onclick="openInvoiceView('${type}',${i})"><i class="ti ti-eye"></i></button>
+            <button class="btn sm icon" title="Edit" onclick="editEntry(${i},'${type}')"><i class="ti ti-edit"></i></button>
+            <button class="btn sm icon danger" title="Delete" onclick="deleteEntry(${i},'${type}')"><i class="ti ti-trash"></i></button>`;
+        } else {
+          // Employee: only view
+          actions = `<button class="btn sm icon" title="View" onclick="openInvoiceView('${type}',${i})"><i class="ti ti-eye"></i></button>`;
+        }
         return `<tr>
           <td>${i+1}</td><td class="cell-strong">${r.invoiceNo}</td><td>${r.party}</td>
           <td>${r.date}</td><td>${r.items.length} item${r.items.length>1?'s':''}</td>
           <td class="cell-strong">${fmt(t.total)}</td><td>${badge(r.status)}</td>
-          <td>
-            <button class="btn sm icon" title="View" onclick="openInvoiceView('${type}',${i})"><i class="ti ti-eye"></i></button>
-            <button class="btn sm icon" title="Edit" onclick="editEntry(${i},'${type}')"><i class="ti ti-edit"></i></button>
-            <button class="btn sm icon danger" title="Delete" onclick="deleteEntry(${i},'${type}')"><i class="ti ti-trash"></i></button>
-          </td>
+          <td>${actions}</td>
         </tr>`;
       }).join('');
     }
@@ -947,7 +1291,7 @@
       const data = isC ? store.customers : store.vendors;
       const tbody = document.getElementById(type+'-tbody');
       const bills = isC ? store.sales : store.purchases;
-      if (!data.length) { tbody.innerHTML=`<tr><td colspan="7" class="empty">Koi ${isC?'customer':'vendor'} nahi. Abhi add karein.</td></tr>`; return; }
+      if (!data.length) { tbody.innerHTML=`<tr><td colspan="7" class="empty">Koi ${isC?'customer':'vendor'} nahi.</td></tr>`; return; }
       tbody.innerHTML = data.map((p,i) => {
         const related = bills.filter(b=>b.party===p.name);
         const total = related.reduce((a,b)=>a+calcTotals(b.items).total,0);
@@ -960,7 +1304,7 @@
 
     function renderProducts() {
       const tbody = document.getElementById('products-tbody');
-      if (!store.products.length) { tbody.innerHTML='<tr><td colspan="8" class="empty">Koi product nahi. Abhi add karein.</td></tr>'; return; }
+      if (!store.products.length) { tbody.innerHTML='<tr><td colspan="8" class="empty">Koi product nahi.</td></tr>'; return; }
       tbody.innerHTML = store.products.map((p,i) => `<tr>
         <td>${i+1}</td><td class="cell-strong">${p.name}</td><td>${p.unit||'-'}</td>
         <td class="cell-strong">${fmt(p.salePrice||0)}</td><td>${fmt(p.purchasePrice||0)}</td>
@@ -977,7 +1321,6 @@
       document.getElementById('product-list').innerHTML = store.products.map(p =>
         `<option value="${p.name}">Stock: ${p.stock||0} | ${fmt(p.salePrice||0)} / ${p.unit||'unit'}</option>`
       ).join('');
-
       const chipList = document.getElementById('stock-chip-list');
       if (!chipList) return;
       chipList.innerHTML = store.products.map(p => {
@@ -1003,6 +1346,7 @@
       return store.products.find(p => p.name.toLowerCase() === String(name).trim().toLowerCase());
     }
 
+    // ===== CUSTOMER LEDGER =====
     function setupLedgerYears() {
       const years = [...new Set(store.sales.map(s=>new Date(s.date+'T00:00:00').getFullYear()))].sort((a,b)=>b-a);
       const currentYear = new Date().getFullYear();
@@ -1010,389 +1354,404 @@
       document.getElementById('ledger-year').innerHTML = '<option value="">All years</option>' + years.map(y=>`<option value="${y}">${y}</option>`).join('');
     }
 
-    function openCustomerLedgerByIndex(index) { openCustomerLedger(store.customers[index].name); }
+    function openCustomerLedgerByIndex(index) { openCustomerLedger(store.customers[index]?.name || ''); }
 
-    function openCustomerLedger(customerName) {
-      activeLedgerCustomer = customerName;
+    function openCustomerLedger(name) {
+      activeLedgerCustomer = name;
+      document.getElementById('ledger-title').textContent = 'Record: ' + name;
       setupLedgerYears();
-      document.getElementById('ledger-title').textContent = `${customerName} - Billing Record`;
-      document.getElementById('ledger-month').value = '';
-      document.getElementById('ledger-year').value = '';
+      const now = new Date();
+      document.getElementById('ledger-month').value = now.toISOString().slice(0,7);
       renderCustomerLedger();
       document.getElementById('customer-ledger-modal').classList.add('open');
     }
 
-    function closeCustomerLedger() { document.getElementById('customer-ledger-modal').classList.remove('open'); }
-    function clearLedgerFilter() { document.getElementById('ledger-month').value=''; document.getElementById('ledger-year').value=''; renderCustomerLedger(); }
+    function closeCustomerLedger() {
+      document.getElementById('customer-ledger-modal').classList.remove('open');
+    }
 
-    function filteredCustomerSales() {
-      const month = document.getElementById('ledger-month').value;
-      const year = document.getElementById('ledger-year').value;
-      return store.sales.map((invoice,index)=>({invoice,index})).filter(({invoice})=>{
-        if (invoice.party!==activeLedgerCustomer) return false;
-        if (month && !invoice.date.startsWith(month)) return false;
-        if (year && new Date(invoice.date+'T00:00:00').getFullYear()!==Number(year)) return false;
-        return true;
-      });
+    function clearLedgerFilter() {
+      document.getElementById('ledger-month').value = '';
+      document.getElementById('ledger-year').value = '';
+      renderCustomerLedger();
     }
 
     function renderCustomerLedger() {
-      const rows = filteredCustomerSales();
-      const total = rows.reduce((a,r)=>a+calcTotals(r.invoice.items).total,0);
-      const pending = rows.filter(r=>r.invoice.status==='pending').reduce((a,r)=>a+calcTotals(r.invoice.items).total,0);
+      const month = document.getElementById('ledger-month').value;
+      const year  = document.getElementById('ledger-year').value;
+      let bills = store.sales.filter(s => s.party === activeLedgerCustomer);
+      if (month) bills = bills.filter(s => s.date && s.date.startsWith(month));
+      else if (year) bills = bills.filter(s => s.date && s.date.startsWith(year));
+      const total   = bills.reduce((a,b) => a + calcTotals(b.items).total, 0);
+      const paid    = bills.filter(b => b.status==='paid').reduce((a,b) => a + calcTotals(b.items).total, 0);
+      const pending = bills.filter(b => b.status==='pending').reduce((a,b) => a + calcTotals(b.items).total, 0);
       document.getElementById('ledger-summary').innerHTML = `
-        <div class="mini-stat"><span>Total Bills</span><strong>${rows.length}</strong></div>
-        <div class="mini-stat"><span>Total Billing</span><strong>${fmt(total)}</strong></div>
-        <div class="mini-stat"><span>Pending</span><strong>${fmt(pending)}</strong></div>`;
-      const tbody = document.getElementById('ledger-tbody');
-      if (!rows.length) { tbody.innerHTML='<tr><td colspan="7" class="empty">Koi invoice nahi mila.</td></tr>'; return; }
-      tbody.innerHTML = rows.map((row,i) => {
-        const r = row.invoice, t = calcTotals(r.items);
-        return `<tr>
-          <td>${i+1}</td><td class="cell-strong">${r.invoiceNo}</td><td>${niceDate(r.date)}</td>
-          <td>${r.items.length} item${r.items.length>1?'s':''}</td><td class="cell-strong">${fmt(t.total)}</td><td>${badge(r.status)}</td>
-          <td><button class="btn sm" onclick="openInvoiceView('sales',${row.index})"><i class="ti ti-eye"></i>View</button></td>
-        </tr>`;
-      }).join('');
+        <div class="mini-stat"><span>Total Bills</span><strong>${bills.length}</strong></div>
+        <div class="mini-stat"><span>Total Amount</span><strong>${fmt(total)}</strong></div>
+        <div class="mini-stat"><span>Pending</span><strong style="color:var(--amber)">${fmt(pending)}</strong></div>`;
+      document.getElementById('ledger-tbody').innerHTML = bills.length
+        ? bills.map((r,i) => {
+            const t = calcTotals(r.items);
+            const origIdx = store.sales.indexOf(r);
+            return `<tr>
+              <td>${i+1}</td><td class="cell-strong">${r.invoiceNo}</td>
+              <td>${niceDate(r.date)}</td><td>${r.items.length} items</td>
+              <td class="cell-strong">${fmt(t.total)}</td><td>${badge(r.status)}</td>
+              <td><button class="btn sm icon" onclick="openInvoiceView('sales',${origIdx})"><i class="ti ti-eye"></i></button></td>
+            </tr>`;
+          }).join('')
+        : `<tr><td colspan="7" class="empty">Koi record nahi.</td></tr>`;
     }
 
-    function invoiceHTML(type, index) {
-      const data = type==='sales' ? store.sales : store.purchases;
-      const r = data[index];
-      const partyList = type==='sales' ? store.customers : store.vendors;
-      const party = partyList.find(p=>p.name===r.party) || {};
-      const totals = calcTotals(r.items);
-      const title = type==='sales' ? 'SALE INVOICE' : 'PURCHASE BILL';
-      const billLabel = type==='sales' ? 'Invoice No' : 'Bill No';
-      const rows = r.items.map((item,i) => {
-        const c = calcItem(item);
-        return `<tr><td>${i+1}</td><td>${esc(item.name)}</td><td>${esc(item.qty)}</td><td>${esc(item.unit)}</td><td>${fmt(item.price)}</td><td>${esc(item.gst)}%</td><td class="cell-strong">${fmt(c.total)}</td></tr>`;
-      }).join('');
-      return `
-        <div class="invoice-head">
-          <div><h3>BillPro</h3><div>Business Billing</div><div>India</div></div>
-          <div class="invoice-meta"><strong>${title}</strong><br>${billLabel}: ${esc(r.invoiceNo)}<br>Date: ${niceDate(r.date)}<br>Due: ${niceDate(r.due)}<br>Status: ${esc(r.status)}</div>
-        </div>
-        <div class="invoice-party">
-          <div><span>Bill To</span><strong>${esc(r.party)}</strong><div>Phone: ${esc(r.phone||party.phone||'-')}</div><div>GSTIN: ${esc(party.gstin||'-')}</div><div>${esc(party.address||'')}</div></div>
-          <div><span>Summary</span><strong>${fmt(totals.total)}</strong><div>Subtotal: ${fmt(totals.sub)}</div><div>GST: ${fmt(totals.gst)}</div></div>
-        </div>
-        <div class="table-wrap"><table><thead><tr><th>#</th><th>Item</th><th>Qty</th><th>Unit</th><th>Price</th><th>GST</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <div class="total-section"><div class="total-row"><span>Subtotal</span><span>${fmt(totals.sub)}</span></div><div class="total-row"><span>GST</span><span>${fmt(totals.gst)}</span></div><div class="total-row grand"><span>Total</span><span>${fmt(totals.total)}</span></div></div>
-        ${r.notes?`<div class="invoice-note"><strong>Notes:</strong> ${esc(r.notes)}</div>`:''}`;
-    }
+    // ===== INVOICE MODAL =====
+    function openModal(type) {
+      currentType = type;
+      editIndex = -1;
+      document.getElementById('modal-title').textContent = type === 'sale' ? 'New Sale Invoice' : 'New Purchase Bill';
+      document.getElementById('items-body').innerHTML = '';
+      document.getElementById('f-party').value = '';
+      document.getElementById('f-date').value = new Date().toISOString().slice(0,10);
+      document.getElementById('f-due').value = '';
+      document.getElementById('f-notes').value = '';
+      document.getElementById('f-status').value = 'pending';
+      document.getElementById('f-bill-prefix').value = type === 'sale' ? 'INV-' : 'PUR-';
+      document.getElementById('f-billno').value = type === 'sale'
+        ? getNextCounter('INV-', store.sales)
+        : getNextCounter('PUR-', store.purchases);
 
-    function openInvoiceView(type, index) {
-      activeInvoice = { type, index };
-      document.getElementById('invoice-preview').innerHTML = invoiceHTML(type, index);
-      document.getElementById('invoice-view-modal').classList.add('open');
-    }
-    function closeInvoiceView() { document.getElementById('invoice-view-modal').classList.remove('open'); }
-    function printInvoice() { if (!activeInvoice) return; window.print(); }
+      // Update party label & list
+      const label = type === 'sale' ? 'Select Customer' : 'Select Vendor';
+      document.getElementById('party-label').textContent = label;
+      document.getElementById('f-party').placeholder = type === 'sale' ? 'Search customers...' : 'Search vendors...';
+      const parties = type === 'sale' ? store.customers : store.vendors;
+      document.getElementById('party-list').innerHTML = parties.map(p => `<option value="${p.name}">`).join('');
 
-    function openModal(type, idx=-1) {
-      currentType = type; editIndex = idx;
-      const isSale = type==='sale';
-      document.getElementById('modal-title').textContent = idx>=0 ? (isSale?'Edit Invoice':'Edit Purchase Bill') : (isSale?'Create Invoice':'Create Purchase Bill');
-      document.getElementById('party-label').textContent = isSale ? 'Customer Name' : 'Vendor Name';
-      const parties = isSale ? store.customers : store.vendors;
-      document.getElementById('party-list').innerHTML = parties.map(p=>`<option value="${p.name}">`).join('');
       updateProductList();
-      const today = new Date().toISOString().split('T')[0];
-      if (idx>=0) {
-        const r = isSale ? store.sales[idx] : store.purchases[idx];
-        const parts = splitBillNo(r.invoiceNo, isSale?'INV-':'PUR-');
-        document.getElementById('f-party').value = r.party;
-        document.getElementById('f-bill-prefix').value = parts.prefix;
-        document.getElementById('f-billno').value = parts.number;
-        document.getElementById('f-date').value = r.date;
-        document.getElementById('f-due').value = r.due;
-        document.getElementById('f-phone').value = r.phone;
-        document.getElementById('f-status').value = r.status;
-        document.getElementById('f-notes').value = r.notes;
-        document.getElementById('items-body').innerHTML = '';
-        r.items.forEach(it => addItemRow(it));
-      } else {
-        document.getElementById('f-party').value = '';
-        document.getElementById('f-bill-prefix').value = isSale?'INV-':'PUR-';
-        document.getElementById('f-billno').value = String(isSale?invoiceCounters.sale:invoiceCounters.purchase);
-        document.getElementById('f-date').value = today;
-        document.getElementById('f-due').value = '';
-        document.getElementById('f-phone').value = '';
-        document.getElementById('f-status').value = 'pending';
-        document.getElementById('f-notes').value = '';
-        document.getElementById('items-body').innerHTML = '';
-      }
+      addItemRow();
       updateTotals();
       document.getElementById('invoice-modal').classList.add('open');
     }
 
-    function closeModal() { document.getElementById('invoice-modal').classList.remove('open'); }
-
-    function splitBillNo(value, fallbackPrefix) {
-      const match = String(value||'').match(/^([A-Za-z]+-?0*)(.*)$/);
-      if (!match) return { prefix: fallbackPrefix, number: value||'' };
-      return { prefix: match[1].replace(/0+$/,'')||fallbackPrefix, number: match[2]||'' };
+    function closeModal() {
+      document.getElementById('invoice-modal').classList.remove('open');
     }
 
-    function fullBillNo() {
-      const prefix = document.getElementById('f-bill-prefix').value.trim() || (currentType==='sale'?'INV-':'PUR-');
-      const number = document.getElementById('f-billno').value.trim();
-      return prefix + number.padStart(3,'0');
-    }
-
-    function addItemRow(item={}) {
-      const tr = document.createElement('tr');
-      const product = findProduct(item.name||'');
-      const stock = product ? product.stock : null;
-      const stockColor = stock===null ? '' : stock<=0 ? 'var(--red)' : stock<=5 ? 'var(--amber)' : 'var(--green)';
-      const stockText = stock===null ? '' : `Stock: ${stock}`;
-      tr.innerHTML = `
-        <td>
-          <input type="text" list="product-list" placeholder="Item name" value="${esc(item.name||'')}" oninput="handleProductInput(this)">
-          <small class="item-stock-label" style="display:block;font-size:11px;color:${stockColor};margin-top:2px">${stockText}</small>
-        </td>
-        <td><input type="number" min="1" value="${item.qty||1}" oninput="updateTotals();checkStockWarning(this)"></td>
-        <td><input type="text" value="${esc(item.unit||'pcs')}" oninput="updateTotals()"></td>
-        <td><input type="number" min="0" value="${item.price||''}" placeholder="0" oninput="updateTotals()"></td>
-        <td><input type="number" min="0" max="100" value="${item.gst||18}" oninput="updateTotals()"></td>
-        <td><button class="btn sm icon danger" title="Remove" onclick="this.closest('tr').remove();updateTotals()"><i class="ti ti-trash"></i></button></td>`;
-      document.getElementById('items-body').appendChild(tr);
-    }
-
-    function handleProductInput(input) {
-      const product = findProduct(input.value);
-      const row = input.closest('tr');
-      const rowInputs = row.querySelectorAll('input');
-      const stockLabel = row.querySelector('.item-stock-label');
-      if (product) {
-        rowInputs[2].value = product.unit || 'pcs';
-        rowInputs[3].value = currentType==='purchase' ? (product.purchasePrice||0) : (product.salePrice||0);
-        rowInputs[4].value = product.gst || 0;
-        if (stockLabel) {
-          stockLabel.textContent = `Stock: ${product.stock}`;
-          stockLabel.style.color = product.stock<=0 ? 'var(--red)' : product.stock<=5 ? 'var(--amber)' : 'var(--green)';
-        }
-      } else {
-        if (stockLabel) { stockLabel.textContent=''; }
-      }
-      updateTotals();
-    }
-
-    function checkStockWarning(qtyInput) {
-      const row = qtyInput.closest('tr');
-      const nameInput = row.querySelectorAll('input')[0];
-      const stockLabel = row.querySelector('.item-stock-label');
-      const product = findProduct(nameInput.value);
-      if (!product || !stockLabel) return;
-      const qty = parseFloat(qtyInput.value)||0;
-      if (qty > product.stock) {
-        stockLabel.textContent = `⚠️ Stock sirf ${product.stock} hai!`;
-        stockLabel.style.color = 'var(--red)';
-      } else {
-        stockLabel.textContent = `Stock: ${product.stock}`;
-        stockLabel.style.color = product.stock<=5 ? 'var(--amber)' : 'var(--green)';
-      }
-    }
-
-    function addQuickProduct() {
-      const nameInput = document.getElementById('quick-product');
-      const qtyInput = document.getElementById('quick-qty');
-      const name = nameInput.value.trim();
-      if (!name) { alert('Product select karein'); return; }
-      const product = findProduct(name);
-      addItemRow({
-        name,
-        qty: parseFloat(qtyInput.value)||1,
-        unit: product?.unit||'pcs',
-        price: currentType==='purchase' ? (product?.purchasePrice||0) : (product?.salePrice||0),
-        gst: product?.gst??18
-      });
-      nameInput.value=''; qtyInput.value=1;
-      updateTotals();
-    }
-
-    function getItemRows() {
-      const rows=[];
-      document.querySelectorAll('#items-body tr').forEach(tr => {
-        const ins = tr.querySelectorAll('input');
-        rows.push({ name:ins[0].value, qty:parseFloat(ins[1].value)||0, unit:ins[2].value, price:parseFloat(ins[3].value)||0, gst:parseFloat(ins[4].value)||0 });
-      });
-      return rows;
-    }
-
-    function updateTotals() {
-      const t = calcTotals(getItemRows());
-      document.getElementById('t-sub').textContent = fmt(t.sub);
-      document.getElementById('t-gst').textContent = fmt(t.gst);
-      document.getElementById('t-total').textContent = fmt(t.total);
-    }
-
-    function saveEntry() {
-      const party = document.getElementById('f-party').value.trim();
-      if (!party) { alert('Party ka naam daalein'); return; }
-      const partyRecord = (currentType==='sale'?store.customers:store.vendors).find(p=>p.name===party);
-      const items = getItemRows();
-      if (!items.length) { alert('Pehle product add karein'); return; }
-      const entry = {
-        invoiceNo: fullBillNo(), party,
-        phone: document.getElementById('f-phone').value || partyRecord?.phone || '',
-        date: document.getElementById('f-date').value,
-        due: document.getElementById('f-due').value,
-        items,
-        status: document.getElementById('f-status').value,
-        notes: document.getElementById('f-notes').value
-      };
-      const isSale = currentType==='sale';
-
-      if (editIndex>=0) {
-        // Edit: stock wapas karo, naya ghataao
-        if (isSale) {
-          const oldEntry = store.sales[editIndex];
-          oldEntry.items.forEach(item => { const p=findProduct(item.name); if(p) p.stock+=(parseFloat(item.qty)||0); });
-          entry.items.forEach(item => { const p=findProduct(item.name); if(p) p.stock-=(parseFloat(item.qty)||0); });
-        }
-        if (isSale) store.sales[editIndex]=entry; else store.purchases[editIndex]=entry;
-      } else {
-        if (isSale) { store.sales.push(entry); invoiceCounters.sale++; }
-        else { store.purchases.push(entry); invoiceCounters.purchase++; }
-        if (isSale && !store.customers.find(c=>c.name===party)) store.customers.push({name:party,phone:entry.phone,gstin:'',address:''});
-        if (!isSale && !store.vendors.find(v=>v.name===party)) store.vendors.push({name:party,phone:entry.phone,gstin:'',address:''});
-        entry.items.forEach(item => {
-          if (item.name) {
-            const existing = findProduct(item.name);
-            if (existing) {
-              if (isSale) existing.stock -= (parseFloat(item.qty)||0);
-            } else {
-              store.products.push({ name:item.name, unit:item.unit||'pcs', salePrice:item.price||0, purchasePrice:item.price||0, gst:item.gst||0, stock: isSale?-(parseFloat(item.qty)||0):0 });
-            }
-          }
-        });
-      }
-
-      saveData();
-      closeModal();
-      renderTable(isSale?'sales':'purchase');
-      renderProducts();
+    function editEntry(idx, type) {
+      const data = type === 'sales' ? store.sales : store.purchases;
+      const r = data[idx];
+      if (!r) return;
+      currentType = type === 'sales' ? 'sale' : 'purchase';
+      editIndex = idx;
+      document.getElementById('modal-title').textContent = type === 'sales' ? 'Edit Sale Invoice' : 'Edit Purchase Bill';
+      const parts = String(r.invoiceNo || '').match(/^([A-Z]+-?)(\d+)$/);
+      document.getElementById('f-bill-prefix').value = parts ? parts[1] : 'INV-';
+      document.getElementById('f-billno').value = parts ? parts[2] : r.invoiceNo;
+      document.getElementById('f-party').value = r.party || '';
+      document.getElementById('f-date').value = r.date || '';
+      document.getElementById('f-due').value = r.due || '';
+      document.getElementById('f-notes').value = r.notes || '';
+      document.getElementById('f-status').value = r.status || 'pending';
+      document.getElementById('party-label').textContent = currentType === 'sale' ? 'Select Customer' : 'Select Vendor';
+      const parties = currentType === 'sale' ? store.customers : store.vendors;
+      document.getElementById('party-list').innerHTML = parties.map(p => `<option value="${p.name}">`).join('');
+      document.getElementById('items-body').innerHTML = '';
+      (r.items || []).forEach(item => addItemRow(item));
       updateProductList();
-      if (activeLedgerCustomer) renderCustomerLedger();
+      updateTotals();
+      document.getElementById('invoice-modal').classList.add('open');
     }
 
-    async function editEntry(idx, type) {
-      if (!currentUser) { alert('Edit ke liye pehle login karein'); return; }
-      const entered = prompt(`${type==='sales'?'Sale Invoice':'Purchase Bill'} edit karne ke liye password dalo`);
-      if (!entered) return;
-      const user = window._fbAuth.currentUser;
-      try {
-        await window._fbFns.signInWithEmailAndPassword(window._fbAuth, user.email, entered);
-        openModal(type==='sales'?'sale':'purchase', idx);
-      } catch(e) { alert('Galat password! Edit nahi hoga.'); }
+    async function saveEntry() {
+      const prefix   = document.getElementById('f-bill-prefix').value.trim();
+      const num      = document.getElementById('f-billno').value.trim();
+      const invoiceNo = prefix + String(num).padStart(4, '0');
+      const party    = document.getElementById('f-party').value.trim();
+      const date     = document.getElementById('f-date').value;
+      const due      = document.getElementById('f-due').value;
+      const notes    = document.getElementById('f-notes').value.trim();
+      const status   = document.getElementById('f-status').value;
+
+      if (!party) { alert('Party naam daalein'); return; }
+      if (!date)  { alert('Date select karein'); return; }
+
+      const rows = document.querySelectorAll('#items-body tr');
+      const items = [];
+      rows.forEach(row => {
+        const inputs = row.querySelectorAll('input');
+        if (!inputs.length) return;
+        const name  = inputs[0].value.trim();
+        const qty   = parseFloat(inputs[1].value) || 0;
+        const unit  = inputs[2].value.trim();
+        const price = parseFloat(inputs[3].value) || 0;
+        const gst   = parseFloat(inputs[4].value) || 0;
+        if (name) items.push({ name, qty, unit, price, gst });
+      });
+      if (!items.length) { alert('Kam se kam ek item add karein'); return; }
+
+      const entry = { invoiceNo, party, date, due, notes, status, items };
+      const arr = currentType === 'sale' ? store.sales : store.purchases;
+
+      if (editIndex >= 0) {
+        arr[editIndex] = entry;
+      } else {
+        arr.push(entry);
+      }
+
+      await saveData();
+      invoiceCounters = loadInvoiceCounters();
+      closeModal();
+      if (currentType === 'sale') renderTable('sales');
+      else renderTable('purchase');
+      renderDashboard();
     }
 
     async function deleteEntry(idx, type) {
-      if (!await verifyDeletePassword(type==='sales'?'Sale invoice':'Purchase bill')) return;
-      if (type==='sales') {
-        const entry = store.sales[idx];
-        entry.items.forEach(item => { const p=findProduct(item.name); if(p) p.stock+=(parseFloat(item.qty)||0); });
-        store.sales.splice(idx,1);
-      } else {
-        store.purchases.splice(idx,1);
-      }
-      saveData();
+      const arr = type === 'sales' ? store.sales : store.purchases;
+      const r = arr[idx];
+      if (!confirm(`"${r?.invoiceNo}" delete karein?`)) return;
+      const ok = await verifyDeletePassword(r?.invoiceNo);
+      if (!ok) return;
+      arr.splice(idx, 1);
+      await saveData();
       renderTable(type);
-      renderProducts();
-      updateProductList();
-      if (activeLedgerCustomer && type==='sales') renderCustomerLedger();
+      renderDashboard();
     }
 
+    // ===== ITEM ROWS =====
+    function addItemRow(item) {
+      const tbody = document.getElementById('items-body');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text" placeholder="Product name" value="${esc(item?.name||'')}" oninput="autoFillProduct(this)"></td>
+        <td><input type="number" min="0.01" step="0.01" placeholder="1" value="${item?.qty||1}" oninput="updateTotals()"></td>
+        <td><input type="text" placeholder="pcs" value="${esc(item?.unit||'')}"></td>
+        <td><input type="number" min="0" step="0.01" placeholder="0.00" value="${item?.price||''}" oninput="updateTotals()"></td>
+        <td><input type="number" min="0" max="100" step="0.01" placeholder="0" value="${item?.gst||0}" oninput="updateTotals()"></td>
+        <td><button class="btn sm icon danger" onclick="removeRow(this)" title="Remove"><i class="ti ti-trash"></i></button></td>`;
+      tbody.appendChild(tr);
+      updateTotals();
+    }
+
+    function removeRow(btn) {
+      btn.closest('tr').remove();
+      updateTotals();
+    }
+
+    function autoFillProduct(input) {
+      const prod = findProduct(input.value);
+      if (!prod) { updateTotals(); return; }
+      const row = input.closest('tr');
+      const inputs = row.querySelectorAll('input');
+      inputs[2].value = prod.unit || '';
+      inputs[3].value = prod.salePrice || 0;
+      inputs[4].value = prod.gst || 0;
+      updateTotals();
+    }
+
+    function addQuickProduct() {
+      const name = document.getElementById('quick-product').value.trim();
+      const qty  = parseFloat(document.getElementById('quick-qty').value) || 1;
+      if (!name) { alert('Product naam daalein'); return; }
+      const prod = findProduct(name);
+      addItemRow({ name, qty, unit: prod?.unit || '', price: prod?.salePrice || 0, gst: prod?.gst || 0 });
+      document.getElementById('quick-product').value = '';
+      document.getElementById('quick-qty').value = 1;
+    }
+
+    function updateTotals() {
+      const rows = document.querySelectorAll('#items-body tr');
+      const items = [];
+      rows.forEach(row => {
+        const inputs = row.querySelectorAll('input');
+        if (!inputs.length) return;
+        items.push({
+          qty:   parseFloat(inputs[1].value)||0,
+          price: parseFloat(inputs[3].value)||0,
+          gst:   parseFloat(inputs[4].value)||0
+        });
+      });
+      const t = calcTotals(items);
+      document.getElementById('t-sub').textContent   = fmt(t.sub);
+      document.getElementById('t-gst').textContent   = fmt(t.gst);
+      document.getElementById('t-total').textContent = fmt(t.total);
+    }
+
+    // ===== PARTY MODAL =====
     function openPartyModal(type) {
-      currentPartyType=type; editPartyIndex=-1;
-      document.getElementById('party-modal-title').textContent = `Add ${type==='customer'?'Customer':'Vendor'}`;
-      ['p-name','p-phone','p-gstin','p-address'].forEach(id=>document.getElementById(id).value='');
+      currentPartyType = type;
+      editPartyIndex = -1;
+      document.getElementById('party-modal-title').textContent = type === 'customer' ? 'Add Customer' : 'Add Vendor';
+      ['p-name','p-phone','p-gstin','p-address'].forEach(id => document.getElementById(id).value = '');
       document.getElementById('party-modal').classList.add('open');
     }
-    function closePartyModal() { document.getElementById('party-modal').classList.remove('open'); }
-    function saveParty() {
-      const name = document.getElementById('p-name').value.trim();
+
+    function closePartyModal() {
+      document.getElementById('party-modal').classList.remove('open');
+    }
+
+    async function saveParty() {
+      const name    = document.getElementById('p-name').value.trim();
+      const phone   = document.getElementById('p-phone').value.trim();
+      const gstin   = document.getElementById('p-gstin').value.trim();
+      const address = document.getElementById('p-address').value.trim();
       if (!name) { alert('Naam daalein'); return; }
-      const p = { name, phone:document.getElementById('p-phone').value, gstin:document.getElementById('p-gstin').value, address:document.getElementById('p-address').value };
-      if (currentPartyType==='customer') { store.customers.push(p); renderParties('customers'); }
-      else { store.vendors.push(p); renderParties('vendors'); }
-      saveData(); closePartyModal();
+      const entry = { name, phone, gstin, address };
+      const arr = currentPartyType === 'customer' ? store.customers : store.vendors;
+      if (editPartyIndex >= 0) arr[editPartyIndex] = entry;
+      else arr.push(entry);
+      await saveData();
+      closePartyModal();
+      if (currentPartyType === 'customer') renderParties('customers');
+      else renderParties('vendors');
+      updateProductList();
     }
 
     async function deleteParty(idx, type) {
-      const isCustomer = type==='customers';
-      const party = isCustomer ? store.customers[idx] : store.vendors[idx];
-      if (!party) return;
-      if (!await verifyDeletePassword(isCustomer?'Customer':'Vendor')) return;
-      if (isCustomer) { store.customers.splice(idx,1); store.sales=store.sales.filter(r=>r.party!==party.name); renderParties('customers'); renderTable('sales'); }
-      else { store.vendors.splice(idx,1); store.purchases=store.purchases.filter(r=>r.party!==party.name); renderParties('vendors'); renderTable('purchase'); }
-      saveData(); renderDashboard();
+      const arr = type === 'customers' ? store.customers : store.vendors;
+      const p = arr[idx];
+      if (!confirm(`"${p?.name}" delete karein?`)) return;
+      arr.splice(idx, 1);
+      await saveData();
+      renderParties(type);
     }
 
-    async function openProductModal(idx=-1) {
-      if (idx>=0) {
-        if (!currentUser) { alert('Edit ke liye pehle login karein'); return; }
-        const entered = prompt('Product edit karne ke liye password dalo');
-        if (!entered) return;
-        try {
-          await window._fbFns.signInWithEmailAndPassword(window._fbAuth, window._fbAuth.currentUser.email, entered);
-        } catch(e) { alert('Galat password!'); return; }
+    // ===== PRODUCT MODAL =====
+    function openProductModal(idx) {
+      editProductIndex = (idx !== undefined) ? idx : -1;
+      document.getElementById('product-modal-title').textContent = editProductIndex >= 0 ? 'Edit Product' : 'Add Product';
+      if (editProductIndex >= 0) {
+        const p = store.products[editProductIndex];
+        document.getElementById('pr-name').value     = p.name || '';
+        document.getElementById('pr-unit').value     = p.unit || '';
+        document.getElementById('pr-sale').value     = p.salePrice || '';
+        document.getElementById('pr-purchase').value = p.purchasePrice || '';
+        document.getElementById('pr-gst').value      = p.gst || '';
+        document.getElementById('pr-stock').value    = p.stock || '';
+      } else {
+        ['pr-name','pr-unit','pr-sale','pr-purchase','pr-gst','pr-stock'].forEach(id => document.getElementById(id).value = '');
       }
-      editProductIndex=idx;
-      document.getElementById('product-modal-title').textContent = idx>=0?'Edit Product':'Add Product';
-      const p = idx>=0 ? store.products[idx] : {name:'',unit:'pcs',salePrice:'',purchasePrice:'',gst:18,stock:0};
-      document.getElementById('pr-name').value = p.name||'';
-      document.getElementById('pr-unit').value = p.unit||'pcs';
-      document.getElementById('pr-sale').value = p.salePrice??'';
-      document.getElementById('pr-purchase').value = p.purchasePrice??'';
-      document.getElementById('pr-gst').value = p.gst??18;
-      document.getElementById('pr-stock').value = p.stock??0;
       document.getElementById('product-modal').classList.add('open');
     }
-    function closeProductModal() { document.getElementById('product-modal').classList.remove('open'); }
-    function saveProduct() {
-      const name = document.getElementById('pr-name').value.trim();
-      if (!name) { alert('Product ka naam daalein'); return; }
-      const product = {
-        name, unit:document.getElementById('pr-unit').value||'pcs',
-        salePrice:parseFloat(document.getElementById('pr-sale').value)||0,
-        purchasePrice:parseFloat(document.getElementById('pr-purchase').value)||0,
-        gst:parseFloat(document.getElementById('pr-gst').value)||0,
-        stock:parseFloat(document.getElementById('pr-stock').value)||0
-      };
-      if (editProductIndex>=0) store.products[editProductIndex]=product;
-      else store.products.push(product);
-      saveData(); closeProductModal(); renderProducts(); updateProductList();
+
+    function closeProductModal() {
+      document.getElementById('product-modal').classList.remove('open');
+    }
+
+    async function saveProduct() {
+      const name          = document.getElementById('pr-name').value.trim();
+      const unit          = document.getElementById('pr-unit').value.trim();
+      const salePrice     = parseFloat(document.getElementById('pr-sale').value) || 0;
+      const purchasePrice = parseFloat(document.getElementById('pr-purchase').value) || 0;
+      const gst           = parseFloat(document.getElementById('pr-gst').value) || 0;
+      const stock         = parseFloat(document.getElementById('pr-stock').value) || 0;
+      if (!name) { alert('Product naam daalein'); return; }
+      const entry = { name, unit, salePrice, purchasePrice, gst, stock };
+      if (editProductIndex >= 0) store.products[editProductIndex] = entry;
+      else store.products.push(entry);
+      await saveData();
+      closeProductModal();
+      renderProducts();
+      updateProductList();
     }
 
     async function deleteProduct(idx) {
-      if (!await verifyDeletePassword('Product')) return;
-      store.products.splice(idx,1);
-      saveData(); renderProducts(); updateProductList();
+      const p = store.products[idx];
+      if (!confirm(`"${p?.name}" delete karein?`)) return;
+      store.products.splice(idx, 1);
+      await saveData();
+      renderProducts();
+      updateProductList();
     }
 
-    function filterTable(tableId, q) {
-      document.querySelectorAll(`#${tableId} tbody tr`).forEach(r => {
-        r.style.display = r.textContent.toLowerCase().includes(q.toLowerCase()) ? '' : 'none';
+    // ===== INVOICE VIEW MODAL =====
+    function openInvoiceView(type, idx) {
+      const data = type === 'sales' ? store.sales : store.purchases;
+      const r = data[idx];
+      if (!r) return;
+      activeInvoice = r;
+      const t = calcTotals(r.items);
+      const businessName = 'My Business';
+      document.getElementById('invoice-preview').innerHTML = `
+        <div class="invoice-head">
+          <div>
+            <h3>${businessName}</h3>
+            <div style="color:var(--muted);font-size:13px;line-height:1.7">
+              ${type === 'sales' ? 'Sale Invoice' : 'Purchase Bill'}
+            </div>
+          </div>
+          <div class="invoice-meta">
+            <strong style="font-size:18px">${r.invoiceNo}</strong><br>
+            Date: ${niceDate(r.date)}<br>
+            ${r.due ? 'Due: ' + niceDate(r.due) : ''}
+            ${r.notes ? '<br>Ref: ' + esc(r.notes) : ''}
+          </div>
+        </div>
+        <div class="invoice-party">
+          <div><strong>${type === 'sales' ? 'Bill To' : 'From'}</strong>${esc(r.party)}</div>
+          <div><strong>Status</strong>${badge(r.status)}</div>
+        </div>
+        <div class="table-wrap">
+          <table class="items-table" style="min-width:0">
+            <thead><tr><th>#</th><th>Item</th><th>Qty</th><th>Unit</th><th>Price</th><th>GST%</th><th>Amount</th></tr></thead>
+            <tbody>
+              ${r.items.map((item,i) => {
+                const c = calcItem(item);
+                return `<tr>
+                  <td>${i+1}</td>
+                  <td class="cell-strong">${esc(item.name)}</td>
+                  <td>${item.qty}</td>
+                  <td>${esc(item.unit||'')}</td>
+                  <td>${fmt(item.price)}</td>
+                  <td>${item.gst||0}%</td>
+                  <td class="cell-strong">${fmt(c.total)}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="total-section">
+          <div class="total-row"><span>Subtotal</span><span>${fmt(t.sub)}</span></div>
+          <div class="total-row"><span>GST</span><span>${fmt(t.gst)}</span></div>
+          <div class="total-row grand"><span>Total</span><span>${fmt(t.total)}</span></div>
+        </div>
+        ${r.notes ? `<div class="invoice-note">Note: ${esc(r.notes)}</div>` : ''}`;
+      document.getElementById('invoice-view-modal').classList.add('open');
+    }
+
+    function closeInvoiceView() {
+      document.getElementById('invoice-view-modal').classList.remove('open');
+    }
+
+    function printInvoice() { window.print(); }
+
+    // ===== FILTER TABLE =====
+    function filterTable(tableId, query) {
+      const q = query.toLowerCase();
+      document.querySelectorAll(`#${tableId} tbody tr`).forEach(tr => {
+        tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
       });
     }
 
-    document.addEventListener('keydown', e => {
-      if (e.key==='Escape') { closeModal(); closePartyModal(); closeProductModal(); closeCustomerLedger(); closeInvoiceView(); }
+    // ===== CLOCK =====
+    function updateClock() {
+      const now = new Date();
+      const timeEl = document.getElementById('liveTime');
+      const dateEl = document.getElementById('liveDate');
+      if (!timeEl) return;
+      timeEl.textContent = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+      dateEl.textContent = now.toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // ===== INIT =====
+    // Wait for Firebase then initialize UI
+    window.addEventListener('load', () => {
+      // setAuthMode is already on window — called by onAuthStateChanged when user logs out
+      // If no firebase yet, show login
+      if (!window._fbAuth) setAuthMode('login');
     });
 
-    document.body.classList.add('auth-locked');
-    setAuthMode('login');
-
-    function updateHeaderClock() {
-      const now = new Date();
-      document.getElementById('liveTime').textContent = now.toLocaleTimeString();
-      document.getElementById('liveDate').textContent = now.toLocaleDateString('en-IN',{weekday:'short',day:'2-digit',month:'short',year:'numeric'});
-    }
-    setInterval(updateHeaderClock, 1000);
-    updateHeaderClock();
   </script>
 </body>
 </html>
