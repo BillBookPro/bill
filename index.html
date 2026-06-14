@@ -1206,13 +1206,7 @@ const firebaseConfig = {
             <input type="number" id="quick-qty" min="1" value="1" placeholder="Qty">
             <button class="btn primary" onclick="addQuickProduct()"><i class="ti ti-plus" aria-hidden="true"></i>Add to Bill</button>
           </div>
-          <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
-  <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
-  <button class="btn sm" onclick="addItemRow()"><i class="ti ti-plus" aria-hidden="true"></i>Add Custom Item</button>
-  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center" id="stock-chip-list"></div>
-</div>
-  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center" id="stock-chip-list"></div>
-</div>
+          <button class="btn sm" onclick="addItemRow()"><i class="ti ti-plus" aria-hidden="true"></i>Add Custom Item</button>
           
 
         <div class="total-section" id="totals-section">
@@ -1623,11 +1617,7 @@ function verifyDeletePassword(itemLabel = 'ye item') {
     </span>
   `).join('');
     }
-function quickAddChip(name, price, unit, gst, stock) {
-  if (stock <= 0) { alert(`${name} out of stock hai!`); return; }
-  addItemRow({ name, qty: 1, unit, price, gst });
-  updateTotals();
-}
+
     function findProduct(name) {
       return store.products.find(p => p.name.toLowerCase() === String(name).trim().toLowerCase());
     }
