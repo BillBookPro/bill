@@ -3348,14 +3348,13 @@
         statusMsg.textContent = `⏳ Transaction ID "${transId}" submit hua. Admin verification ke baad access milega.`;
 
         setTimeout(() => {
-          // FIX: Abhi access nahi dena — admin ko manually verify karna hoga
-          // lekin agar demo mode ya testing ke liye unlock karna ho to neeche uncomment karein:
-          // setEmployeePaid(true);
+          // Payment hote hi employee feature unlock ho jata hai
+          setEmployeePaid(true);
           closePaymentModal();
           payConfirmBtn.disabled = false;
           payConfirmBtn.textContent = 'Pay ₹50';
 
-          showToast('warning', '⏳ Payment Submitted', `Transaction ID save ho gaya. Admin verify karke access dega.`);
+          showToast('success', '✅ Payment Successful', `Employee feature ab unlock ho gaya hai!`);
         }, 1800);
       }, 1500);
     }
