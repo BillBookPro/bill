@@ -384,11 +384,13 @@
     }
 
     .live-header-clock {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      transform: translate(-50%, -50%);
       text-align: center;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
     }
 
     #liveTime {
@@ -896,48 +898,277 @@
       font-size: 18px;
     }
 
+    /* ── PREMIUM INVOICE STYLES ── */
     .invoice-paper {
       background: #fff;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      padding: 22px;
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+      font-family: var(--font-sans);
+      box-shadow: 0 4px 24px rgba(22,99,166,.10);
     }
 
-    .invoice-head {
+    /* ADIXION watermark */
+    .invoice-paper::before {
+      content: "ADIXION";
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%) rotate(-35deg);
+      font-size: 96px;
+      font-weight: 900;
+      color: rgba(22, 99, 166, 0.055);
+      letter-spacing: 10px;
+      pointer-events: none;
+      user-select: none;
+      white-space: nowrap;
+      z-index: 0;
+    }
+
+    .invoice-paper > * { position: relative; z-index: 1; }
+
+    /* Top gradient header bar */
+    .inv-header {
+      background: linear-gradient(135deg, #1663a6 0%, #0c477c 50%, #14845f 100%);
+      padding: 28px 32px 24px;
       display: flex;
+      align-items: flex-start;
       justify-content: space-between;
-      gap: 18px;
-      border-bottom: 2px solid var(--text);
-      padding-bottom: 16px;
-      margin-bottom: 18px;
+      gap: 20px;
+      position: relative;
+      overflow: hidden;
     }
 
-    .invoice-head h3 {
-      font-size: 26px;
+    .inv-header::after {
+      content: "";
+      position: absolute;
+      right: -40px; top: -40px;
+      width: 200px; height: 200px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.07);
+    }
+
+    .inv-brand-name {
+      font-size: 30px;
+      font-weight: 900;
+      color: #fff;
+      letter-spacing: 2px;
+      line-height: 1;
+    }
+
+    .inv-brand-sub {
+      font-size: 12px;
+      color: rgba(255,255,255,.72);
+      margin-top: 5px;
+      letter-spacing: 1px;
+    }
+
+    .inv-brand-details {
+      margin-top: 10px;
+      font-size: 12px;
+      color: rgba(255,255,255,.82);
+      line-height: 1.7;
+    }
+
+    .inv-title-block {
+      text-align: right;
+    }
+
+    .inv-title-badge {
+      display: inline-block;
+      background: rgba(255,255,255,.18);
+      border: 1px solid rgba(255,255,255,.3);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      padding: 6px 16px;
+      border-radius: 999px;
+      margin-bottom: 10px;
+    }
+
+    .inv-meta-table {
+      font-size: 12px;
+      color: rgba(255,255,255,.85);
+      line-height: 1.9;
+      text-align: right;
+    }
+
+    .inv-meta-table strong {
+      color: #fff;
+    }
+
+    /* Party + summary section */
+    .inv-party-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      border-bottom: 1px solid #e8eef5;
+    }
+
+    .inv-bill-to {
+      padding: 20px 32px;
+      border-right: 1px solid #e8eef5;
+    }
+
+    .inv-summary-box {
+      padding: 20px 32px;
+      background: linear-gradient(135deg, #f0f7ff, #edf9f4);
+    }
+
+    .inv-section-label {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #1663a6;
+      margin-bottom: 8px;
+    }
+
+    .inv-party-name {
+      font-size: 17px;
+      font-weight: 800;
+      color: #182230;
       margin-bottom: 4px;
     }
 
-    .invoice-meta {
-      text-align: right;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.7;
+    .inv-party-detail {
+      font-size: 12px;
+      color: #667085;
+      line-height: 1.8;
     }
 
-    .invoice-party {
+    .inv-amount-big {
+      font-size: 28px;
+      font-weight: 900;
+      color: #1663a6;
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+
+    .inv-amount-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #667085;
+      padding: 2px 0;
+    }
+
+    /* Items table */
+    .inv-items-wrap {
+      padding: 0 32px;
+      margin: 20px 0;
+    }
+
+    .inv-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .inv-table thead tr {
+      background: linear-gradient(135deg, #1663a6, #14845f);
+    }
+
+    .inv-table thead th {
+      color: #fff;
+      font-weight: 700;
+      padding: 10px 12px;
+      text-align: left;
+      font-size: 12px;
+      letter-spacing: .5px;
+      border: none;
+      background: transparent;
+    }
+
+    .inv-table tbody tr:nth-child(even) {
+      background: #f7fbff;
+    }
+
+    .inv-table tbody tr:hover {
+      background: #eef5ff;
+    }
+
+    .inv-table tbody td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #edf1f5;
+      color: #182230;
+      vertical-align: middle;
+    }
+
+    .inv-table tfoot td {
+      padding: 8px 12px;
+      font-size: 13px;
+      border: none;
+    }
+
+    .inv-table tfoot tr.grand-total td {
+      font-size: 16px;
+      font-weight: 900;
+      color: #1663a6;
+      border-top: 2px solid #1663a6;
+      padding-top: 12px;
+    }
+
+    /* Bottom section */
+    .inv-bottom {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      margin-bottom: 16px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.7;
+      gap: 0;
+      border-top: 1px solid #e8eef5;
+      margin-top: 8px;
     }
 
-    .invoice-party strong {
+    .inv-bank-box {
+      padding: 18px 32px;
+      border-right: 1px solid #e8eef5;
+    }
+
+    .inv-sign-box {
+      padding: 18px 32px;
+      text-align: right;
+    }
+
+    .inv-bank-detail {
+      font-size: 12px;
+      color: #667085;
+      line-height: 1.9;
+    }
+
+    .inv-sign-line {
+      width: 160px;
+      height: 1px;
+      background: #182230;
+      margin: 40px 0 6px auto;
+    }
+
+    .inv-sign-label {
+      font-size: 11px;
+      color: #667085;
+      font-weight: 700;
+    }
+
+    .inv-terms {
+      background: linear-gradient(135deg, #f0f7ff, #edf9f4);
+      padding: 14px 32px;
+      font-size: 11px;
+      color: #667085;
+      line-height: 1.7;
+      border-top: 1px solid #e8eef5;
+    }
+
+    .inv-terms strong {
+      color: #1663a6;
       display: block;
-      color: var(--text);
-      font-size: 15px;
+      margin-bottom: 3px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* Footer stripe */
+    .inv-footer-stripe {
+      background: linear-gradient(135deg, #1663a6 0%, #0c477c 50%, #14845f 100%);
+      height: 6px;
     }
 
     .invoice-note {
@@ -1423,34 +1654,51 @@
     }
 
     @media print {
-      body * {
-        visibility: hidden;
-      }
+      body * { visibility: hidden; }
 
-      #print-area,
-      #print-area * {
-        visibility: visible;
-      }
+      #print-area, #print-area * { visibility: visible; }
 
       #print-area {
-        position: absolute;
+        position: fixed;
         inset: 0;
         padding: 0;
+        margin: 0;
       }
 
-      .modal-footer,
-      .modal-head .btn {
-        display: none !important;
+      .modal-footer, .modal-head .btn, .modal-head { display: none !important; }
+
+      .modal, .modal-bg {
+        position: static !important;
+        background: none !important;
+        padding: 0 !important;
+        width: 100% !important;
+        max-height: none !important;
+        overflow: visible !important;
+        box-shadow: none !important;
       }
 
-      .modal,
       .invoice-paper {
-        width: 100%;
-        max-height: none;
-        overflow: visible;
-        border: 0;
-        box-shadow: none;
+        width: 100% !important;
+        max-height: none !important;
+        overflow: visible !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        page-break-after: avoid;
+        page-break-inside: avoid;
       }
+
+      /* Sirf ek page print ho */
+      @page { margin: 0; size: A4; }
+
+      /* Print mein colors force karo */
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+      .inv-header { padding: 24px 28px 20px; }
+      .inv-items-wrap { padding: 0 28px; }
+      .inv-bill-to, .inv-bank-box { padding: 16px 28px; }
+      .inv-summary-box, .inv-sign-box { padding: 16px 28px; }
+      .inv-terms { padding: 12px 28px; }
     }
 
     @media (max-width: 980px) {
@@ -1654,7 +1902,7 @@
             style="margin-left: auto; font-size: 10px; padding: 2px 6px;">PREMIUM</span></button>
       </nav>
       <div class="employee-nav-section" id="sidebar-emp-section" style="display:none">
-        <button class="exit-emp-btn" onclick="exitEmployeeMode()"
+        <button class="exit-emp-btn" onclick="logoutEmployee()"
           style="display:block; margin:8px 12px; width:calc(100% - 24px);">
           <i class="ti ti-logout"></i> Employee Mode se Exit
         </button>
@@ -1672,12 +1920,11 @@
           <div id="liveDate"></div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
-          <span id="emp-mode-indicator" class="emp-mode-badge" style="display:none"><i
-              class="ti ti-shield-check"></i>Employee Mode</span>
-          <button id="exit-emp-btn-header" class="btn sm danger" style="display:none" onclick="exitEmployeeMode()"><i
-              class="ti ti-logout"></i>Exit Employee Mode</button>
+          <!-- FIX: Employee mode mein ek clean bar - badge + exit button compact -->
+          <span id="emp-mode-indicator" class="emp-mode-badge" style="display:none"><i class="ti ti-shield-check"></i>Employee Mode</span>
+          <button id="exit-emp-btn-header" class="btn sm danger" style="display:none" onclick="logoutEmployee()"><i class="ti ti-logout"></i>Exit Employee Mode</button>
           <span class="user-pill"><i class="ti ti-user-circle"></i><span id="current-user-label"></span></span>
-          <button class="btn sm" onclick="logout()"><i class="ti ti-logout"></i>Logout</button>
+          <button class="btn sm" id="logout-btn-header" onclick="logout()"><i class="ti ti-logout"></i>Logout</button>
         </div>
       </header>
 
@@ -2613,22 +2860,104 @@
       const totals = calcTotals(r.items);
       const title = type === 'sales' ? 'SALE INVOICE' : 'PURCHASE BILL';
       const billLabel = type === 'sales' ? 'Invoice No' : 'Bill No';
+
       const rows = r.items.map((item, i) => {
         const c = calcItem(item);
-        return `<tr><td>${i + 1}</td><td>${esc(item.name)}</td><td>${esc(item.qty)}</td><td>${esc(item.unit)}</td><td>${fmt(item.price)}</td><td>${esc(item.gst)}%</td><td class="cell-strong">${fmt(c.total)}</td></tr>`;
+        return `<tr>
+          <td style="font-weight:700;color:#667085">${i + 1}</td>
+          <td style="font-weight:700">${esc(item.name)}</td>
+          <td>${esc(item.qty)} ${esc(item.unit)}</td>
+          <td>${fmt(item.price)}</td>
+          <td>${esc(item.gst)}%</td>
+          <td style="font-weight:800;color:#1663a6">${fmt(c.total)}</td>
+        </tr>`;
       }).join('');
+
       return `
-        <div class="invoice-head">
-          <div><h3>BillPro</h3><div>Business Billing</div><div>India</div></div>
-          <div class="invoice-meta"><strong>${title}</strong><br>${billLabel}: ${esc(r.invoiceNo)}<br>Date: ${niceDate(r.date)}<br>Due: ${niceDate(r.due)}<br>Status: ${esc(r.status)}</div>
+      <div class="inv-header">
+        <div>
+          <div class="inv-brand-name">ADIXION</div>
+          <div class="inv-brand-sub">Premium Business Solutions</div>
+          <div class="inv-brand-details">
+            📍 Your Address, City, State — 000000<br>
+            📞 +91 00000 00000 &nbsp;|&nbsp; ✉ info@adixion.com<br>
+            🏷 GSTIN: 00AAAAA0000A1Z0
+          </div>
         </div>
-        <div class="invoice-party">
-          <div><span>Bill To</span><strong>${esc(r.party)}</strong><div>Phone: ${esc(r.phone || party.phone || '-')}</div><div>GSTIN: ${esc(party.gstin || '-')}</div><div>${esc(party.address || '')}</div></div>
-          <div><span>Summary</span><strong>${fmt(totals.total)}</strong><div>Subtotal: ${fmt(totals.sub)}</div><div>GST: ${fmt(totals.gst)}</div></div>
+        <div class="inv-title-block">
+          <div class="inv-title-badge">${title}</div>
+          <div class="inv-meta-table">
+            <div>${billLabel}: <strong>${esc(r.invoiceNo)}</strong></div>
+            <div>Date: <strong>${niceDate(r.date)}</strong></div>
+            ${r.due ? `<div>Due: <strong>${niceDate(r.due)}</strong></div>` : ''}
+            <div>Status: <strong style="color:${r.status === 'paid' ? '#5fffb0' : '#ffd97d'}">${r.status.toUpperCase()}</strong></div>
+          </div>
         </div>
-        <div class="table-wrap"><table><thead><tr><th>#</th><th>Item</th><th>Qty</th><th>Unit</th><th>Price</th><th>GST</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <div class="total-section"><div class="total-row"><span>Subtotal</span><span>${fmt(totals.sub)}</span></div><div class="total-row"><span>GST</span><span>${fmt(totals.gst)}</span></div><div class="total-row grand"><span>Total</span><span>${fmt(totals.total)}</span></div></div>
-        ${r.notes ? `<div class="invoice-note"><strong>Notes:</strong> ${esc(r.notes)}</div>` : ''}`;
+      </div>
+
+      <div class="inv-party-row">
+        <div class="inv-bill-to">
+          <div class="inv-section-label">${type === 'sales' ? 'Bill To' : 'Vendor'}</div>
+          <div class="inv-party-name">${esc(r.party)}</div>
+          <div class="inv-party-detail">
+            ${r.phone || party.phone ? `📞 ${esc(r.phone || party.phone)}<br>` : ''}
+            ${party.gstin ? `🏷 GSTIN: ${esc(party.gstin)}<br>` : ''}
+            ${party.address ? `📍 ${esc(party.address)}` : ''}
+          </div>
+        </div>
+        <div class="inv-summary-box">
+          <div class="inv-section-label">Amount Summary</div>
+          <div class="inv-amount-big">${fmt(totals.total)}</div>
+          <div class="inv-amount-row"><span>Subtotal</span><span>${fmt(totals.sub)}</span></div>
+          <div class="inv-amount-row"><span>GST</span><span>${fmt(totals.gst)}</span></div>
+          <div class="inv-amount-row" style="font-weight:800;color:#182230;border-top:1px solid #d0dde8;margin-top:4px;padding-top:6px">
+            <span>Grand Total</span><span style="color:#1663a6">${fmt(totals.total)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="inv-items-wrap">
+        <table class="inv-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Item / Description</th>
+              <th>Qty & Unit</th>
+              <th>Rate</th>
+              <th>GST</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+          <tfoot>
+            <tr><td colspan="5" style="text-align:right;color:#667085;font-weight:700">Subtotal</td><td>${fmt(totals.sub)}</td></tr>
+            <tr><td colspan="5" style="text-align:right;color:#667085;font-weight:700">GST</td><td>${fmt(totals.gst)}</td></tr>
+            <tr class="grand-total"><td colspan="5" style="text-align:right">Total Amount</td><td>${fmt(totals.total)}</td></tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="inv-bottom">
+        <div class="inv-bill-to" style="padding:18px 32px;">
+          <div class="inv-section-label">Notes</div>
+          <div class="inv-party-detail">${r.notes ? esc(r.notes) : 'Thank you for your business!'}</div>
+        </div>
+        <div class="inv-sign-box">
+          <div class="inv-section-label">Authorised Signatory</div>
+          <div class="inv-sign-line"></div>
+          <div class="inv-sign-label">For ADIXION</div>
+        </div>
+      </div>
+
+      <div class="inv-terms">
+        <strong>Terms &amp; Conditions</strong>
+        1. Payment due within 30 days of invoice date. &nbsp;|&nbsp;
+        2. Goods once sold will not be taken back. &nbsp;|&nbsp;
+        3. Subject to local jurisdiction. &nbsp;|&nbsp;
+        4. Late payment may attract interest @2% per month.
+      </div>
+
+      <div class="inv-footer-stripe"></div>`;
     }
 
     function openInvoiceView(type, index) {
@@ -3202,6 +3531,9 @@
         document.getElementById('emp-mode-indicator').style.display = 'none';
         const exitBtn = document.getElementById('exit-emp-btn-header');
         if (exitBtn) exitBtn.style.display = 'none';
+        // FIX: Admin mode mein logout button wapas dikhao
+        const logoutBtn = document.getElementById('logout-btn-header');
+        if (logoutBtn) logoutBtn.style.display = 'inline-flex';
         const sidebarEmpSection = document.getElementById('sidebar-emp-section');
         if (sidebarEmpSection) sidebarEmpSection.style.display = 'none';
 
@@ -3231,6 +3563,9 @@
       document.getElementById('emp-mode-indicator').style.display = 'none';
       const exitBtn = document.getElementById('exit-emp-btn-header');
       if (exitBtn) exitBtn.style.display = 'none';
+      // FIX: Logout button wapas dikhao
+      const logoutBtnL = document.getElementById('logout-btn-header');
+      if (logoutBtnL) logoutBtnL.style.display = 'inline-flex';
       const sidebarEmpSection = document.getElementById('sidebar-emp-section');
       if (sidebarEmpSection) sidebarEmpSection.style.display = 'none';
       switchAuthTab('admin');
@@ -3255,22 +3590,26 @@
         empTab.style.borderBottom = '2px solid var(--blue)';
         empTab.style.color = 'var(--blue)';
 
-        emailRowLabel.textContent = "Admin's Email";
-        emailInput.placeholder = "Enter Admin's Email";
+        // FIX: Employee tab mein Admin Email field bilkul hide karo
+        document.getElementById('auth-email-row').style.display = 'none';
 
+        // Sirf Employee User ID dikhao
         document.getElementById('auth-emp-user-row').style.display = 'block';
         forgotBtn.style.display = 'none';
         switchBtn.style.display = 'none';
-        // FIX: Employee tab mein password field hamesha visible hona chahiye
+        // Password field visible rakho
         document.getElementById('auth-pass').style.display = 'block';
         document.getElementById('auth-pass').closest('.form-group').style.display = 'flex';
         document.getElementById('auth-main-btn').setAttribute('onclick', 'employeeAuthLogin()');
+        document.getElementById('auth-main-btn').textContent = 'Employee Login';
       } else {
         adminTab.style.borderBottom = '2px solid var(--blue)';
         adminTab.style.color = 'var(--blue)';
         empTab.style.borderBottom = 'none';
         empTab.style.color = 'var(--muted)';
 
+        // FIX: Admin tab mein email row wapas dikhao
+        document.getElementById('auth-email-row').style.display = 'flex';
         emailRowLabel.textContent = "Email";
         emailInput.placeholder = "name@example.com";
 
@@ -3279,61 +3618,72 @@
         switchBtn.style.display = 'inline-flex';
 
         document.getElementById('auth-main-btn').setAttribute('onclick', 'login()');
+        document.getElementById('auth-main-btn').textContent = 'Login';
       }
     }
 
-    // Employee Auth Login (directly from login page)
+    // Employee Auth Login (directly from login page) - sirf User ID + Password
     async function employeeAuthLogin() {
-      const adminEmail = document.getElementById('auth-email').value.trim().toLowerCase();
       const empUser = document.getElementById('auth-emp-username').value.trim();
       const empPass = document.getElementById('auth-pass').value;
 
-      if (!adminEmail || !empUser || !empPass) {
-        alert('Admin Email, Employee User ID aur Password sabhi details daalein');
+      if (!empUser || !empPass) {
+        alert('Employee User ID aur Password daalein');
         return;
       }
 
       try {
-        const { collection, query, where, getDocs } = window._fbFns;
+        // FIX: Ab Admin Email ki zaroorat nahi — sirf User ID se sab accounts mein dhundho
+        const { collection, getDocs } = window._fbFns;
         const usersRef = collection(window._fbDb, 'users');
-        const q = query(usersRef, where('adminEmail', '==', adminEmail));
-        const querySnapshot = await getDocs(q);
+        const querySnapshot = await getDocs(usersRef);
 
         if (querySnapshot.empty) {
-          alert('Ye Admin Email registered nahi hai!');
+          alert('Koi registered account nahi mila!');
           return;
         }
 
         let foundAdminUid = null;
-        let adminData = null;
-        querySnapshot.forEach((doc) => {
-          foundAdminUid = doc.id;
-          adminData = doc.data();
+        let foundAdminEmail = null;
+        let foundEmployee = null;
+
+        // Sab admin accounts mein ye User ID dhundho
+        querySnapshot.forEach((docSnap) => {
+          if (foundEmployee) return; // pehle mil gaya to skip
+          const data = docSnap.data();
+          if (data.employees && Array.isArray(data.employees)) {
+            // NULL SAFETY: e.username undefined ho sakta hai, isliye pehle check karo
+            const emp = data.employees.find(e => e && e.username && e.username.toLowerCase() === empUser.toLowerCase());
+            if (emp) {
+              foundAdminUid = docSnap.id;
+              foundAdminEmail = data.adminEmail || '';
+              foundEmployee = emp;
+            }
+          }
         });
 
-        if (!adminData || !adminData.employees || !Array.isArray(adminData.employees)) {
-          alert('Is Admin account ke liye koi employee setup nahi hai!');
+        if (!foundEmployee) {
+          alert('Ye Employee User ID registered nahi hai!');
           return;
         }
 
-        const employee = adminData.employees.find(e => e.username.toLowerCase() === empUser.toLowerCase());
-        if (!employee || employee.password !== empPass) {
-          alert('Galat Employee User ID ya Password!');
+        if (foundEmployee.password !== empPass) {
+          alert('Galat Password!');
           return;
         }
 
-        if (employee.blocked) {
+        if (foundEmployee.blocked) {
           alert('Aapka account Inactive hai. Kripya Admin se sampark karein.');
           return;
         }
 
         // Save employee session to localstorage
         localStorage.setItem('emp_session_admin_uid', foundAdminUid);
-        localStorage.setItem('emp_session_admin_email', adminEmail);
-        localStorage.setItem('emp_session_username', employee.username);
+        localStorage.setItem('emp_session_admin_email', foundAdminEmail);
+        localStorage.setItem('emp_session_username', foundEmployee.username);
 
         await loadEmployeeSession();
-        showToast('success', '🔑 Login Successful', `Logged in as ${employee.username}`);
+        showToast('success', '🔑 Login Successful', `Welcome, ${foundEmployee.username}!`);
       } catch (e) {
         console.error("Employee auth error:", e);
         alert("Login error: " + e.message);
@@ -3346,7 +3696,7 @@
       const adminEmail = localStorage.getItem('emp_session_admin_email');
       const empUsername = localStorage.getItem('emp_session_username');
 
-      if (!adminUid || !adminEmail || !empUsername) return;
+      if (!adminUid || !empUsername) return;
 
       currentUser = adminUid;
       window._fbCurrentEmail = adminEmail;
@@ -3360,7 +3710,7 @@
           store = removeDemoData(snap.data());
           // Verify that this employee wasn't blocked since last load
           if (store.employees) {
-            const currentEmp = store.employees.find(e => e.username.toLowerCase() === empUsername.toLowerCase());
+            const currentEmp = store.employees.find(e => e && e.username && e.username.toLowerCase() === empUsername.toLowerCase());
             if (currentEmp && currentEmp.blocked) {
               alert('Aapka account inactive hai.');
               logoutEmployee();
@@ -3384,9 +3734,13 @@
       document.getElementById('emp-mode-indicator').style.display = 'inline-flex';
       const exitBtn = document.getElementById('exit-emp-btn-header');
       if (exitBtn) exitBtn.style.display = 'inline-flex';
+      // FIX: Employee mode mein normal Logout button hide karo
+      const logoutBtn = document.getElementById('logout-btn-header');
+      if (logoutBtn) logoutBtn.style.display = 'none';
       const sidebarEmpSection = document.getElementById('sidebar-emp-section');
       if (sidebarEmpSection) sidebarEmpSection.style.display = 'block';
-      document.getElementById('current-user-label').textContent = `${empUsername} (${adminEmail})`;
+      // FIX: Sirf employee username dikhao, admin email nahi
+      document.getElementById('current-user-label').textContent = empUsername;
 
       const salesBtn = document.querySelector('.nav-item[data-page="sales"]');
       if (salesBtn) showPage('sales', salesBtn);
