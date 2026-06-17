@@ -10,6 +10,7 @@
   </script>
 
   <script type="module">
+    // ─── FIREBASE IMPORTS ────────────────────────────────────────────────────────
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import {
       getAuth,
@@ -17,7 +18,9 @@
       signInWithEmailAndPassword,
       sendPasswordResetEmail,
       onAuthStateChanged,
-      signOut
+      signOut,
+      reauthenticateWithCredential,
+      EmailAuthProvider
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
     import {
       getFirestore,
@@ -28,7 +31,9 @@
       collection,
       query,
       where,
-      getDocs
+      getDocs,
+      deleteDoc,
+      addDoc
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
     const firebaseConfig = {
@@ -45,6 +50,7 @@
     const auth = getAuth(app);
     const db = getFirestore(app);
 
+    // ─── GLOBAL REFERENCES ─────────────────────────────────────────────────────
     window._fbAuth = auth;
     window._fbDb = db;
     window._fbFns = {
@@ -60,40 +66,14 @@
       collection,
       query,
       where,
-      getDocs
+      getDocs,
+      deleteDoc,
+      addDoc,
+      reauthenticateWithCredential,
+      EmailAuthProvider
     };
 
-    onAuthStateChanged(auth, async (user) => {
-      if (localStorage.getItem('emp_session_admin_uid')) {
-        await loadEmployeeSession();
-        return;
-      }
-
-      if (user) {
-        currentUser = user.uid;
-        window._fbCurrentEmail = user.email;
-        await window._fbLoadStore();
-        if (!store.adminEmail || store.adminEmail !== user.email) {
-          store.adminEmail = user.email;
-          saveData();
-        }
-        invoiceCounters = loadInvoiceCounters();
-        document.body.classList.remove('auth-locked');
-        document.getElementById('current-user-label').textContent = user.email;
-        updateProductList();
-        renderDashboard();
-        updateEmployeesNavUI();
-        setTimeout(applyReturnFilters, 200);
-      } else {
-        currentUser = null;
-        window._fbCurrentEmail = null;
-        store = structuredClone(defaultStore);
-        document.body.classList.add('auth-locked');
-        setAuthMode('login');
-      }
-    });
-
-    // ─── GLOBAL VARIABLES ───
+    // ─── GLOBAL VARIABLES ──────────────────────────────────────────────────────
     let currentType = 'sale';
     let currentPartyType = 'customer';
     let editIndex = -1;
@@ -104,27 +84,39 @@
     let activeInvoice = null;
     let currentUser = null;
     let authMode = 'login';
-    let resetOtp = null,
-      resetOtpUser = null,
-      resetOtpExpiresAt = 0;
     let isEmployeeMode = false;
     const employeeAllowedPages = ['sales', 'purchase', 'returns'];
 
     let returnFilterType = 'all';
     let returnFilterPlatform = 'all';
 
-    const defaultStore = { sales: [], purchases: [], customers: [], vendors: [], products: [], ecomReturns: [],
-      _employeePaid: false, employees: [], adminEmail: '' };
-    const demoCustomerNames = ['Rahul Enterprises', 'Sharma Traders', 'Meena Store', 'Gupta Electronics',
-      'Aarav Retail'
-    ];
-    const demoVendorNames = ['Tech Distributors', 'Mobile World'];
-    const demoProductNames = ['Laptop', 'Mobile', 'Charger', 'Headphones', 'Laptop Stock', 'Phones'];
+    const defaultStore = {
+      sales: [],
+      purchases: [],
+      customers: [],
+      vendors: [],
+      products: [],
+      ecomReturns: [],
+      _employeePaid: false,
+      employees: [],
+      adminEmail: '',
+      _seeded: false,
+      business: { name: 'ADIXION', address: 'Your Address, City, State — 000000', gstin: '00AAAAA0000A1Z0', phone: '+91 00000 00000', email: 'info@adixion.com' }
+    };
 
     let store = structuredClone(defaultStore);
     let invoiceCounters = { sale: 1, purchase: 1 };
 
-    // ─── FIREBASE HELPERS ───
+    // ─── HELPER: HASH PASSWORD (SHA-256) ──────────────────────────────────────
+    async function hashPassword(password) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(password);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return btoa(String.fromCharCode(...hashArray));
+    }
+
+    // ─── FIREBASE HELPERS ──────────────────────────────────────────────────────
     window._fbLoadStore = async function() {
       try {
         const { doc, getDoc } = window._fbFns;
@@ -132,7 +124,7 @@
         const snap = await getDoc(ref);
         if (snap.exists()) {
           const parsed = snap.data();
-          store = removeDemoData({
+          store = {
             sales: Array.isArray(parsed.sales) ? parsed.sales : [],
             purchases: Array.isArray(parsed.purchases) ? parsed.purchases : [],
             customers: Array.isArray(parsed.customers) ? parsed.customers : [],
@@ -141,35 +133,75 @@
             ecomReturns: Array.isArray(parsed.ecomReturns) ? parsed.ecomReturns : [],
             _employeePaid: parsed._employeePaid || false,
             employees: Array.isArray(parsed.employees) ? parsed.employees : [],
-            adminEmail: parsed.adminEmail || ''
-          });
+            adminEmail: parsed.adminEmail || '',
+            _seeded: parsed._seeded || false,
+            business: parsed.business || structuredClone(defaultStore.business)
+          };
+          if (!store._seeded) {
+            seedDemoData();
+            store._seeded = true;
+            await saveData();
+          }
         } else {
           store = structuredClone(defaultStore);
+          store._seeded = false;
+          seedDemoData();
+          store._seeded = true;
+          await saveData();
         }
       } catch (e) {
         console.warn('Firebase load error:', e);
         store = structuredClone(defaultStore);
+        store._seeded = false;
+        seedDemoData();
+        store._seeded = true;
       }
     };
 
-    function removeDemoData(data) {
-      data.sales = data.sales.filter(r => !demoCustomerNames.includes(r.party));
-      data.purchases = data.purchases.filter(r => !demoVendorNames.includes(r.party));
-      data.customers = data.customers.filter(r => !demoCustomerNames.includes(r.name));
-      data.vendors = data.vendors.filter(r => !demoVendorNames.includes(r.name));
-      data.products = data.products.filter(r => !demoProductNames.includes(r.name));
-      return data;
+    function seedDemoData() {
+      if (store.products.length === 0) {
+        const demoProducts = ['Laptop', 'Mobile', 'Charger', 'Headphones', 'Laptop Stock', 'Phones'];
+        demoProducts.forEach(name => {
+          store.products.push({
+            name,
+            unit: 'pcs',
+            salePrice: name === 'Laptop' ? 50000 : name === 'Mobile' ? 15000 : 500,
+            purchasePrice: name === 'Laptop' ? 45000 : name === 'Mobile' ? 12000 : 400,
+            gst: 18,
+            stock: name === 'Laptop' ? 5 : name === 'Mobile' ? 10 : 20,
+            packingStock: 0
+          });
+        });
+      }
+      if (store.customers.length === 0) {
+        const demoCustomers = ['Rahul Enterprises', 'Sharma Traders', 'Meena Store', 'Gupta Electronics', 'Aarav Retail'];
+        demoCustomers.forEach(name => {
+          store.customers.push({ name, phone: '9876543210', gstin: '', address: 'Delhi' });
+        });
+      }
+      if (store.vendors.length === 0) {
+        store.vendors.push({ name: 'Tech Distributors', phone: '9876543211', gstin: '', address: 'Mumbai' });
+        store.vendors.push({ name: 'Mobile World', phone: '9876543212', gstin: '', address: 'Bangalore' });
+      }
     }
 
     async function saveData() {
-      if (!currentUser || !window._fbDb) return;
+      if (!currentUser || !window._fbDb) {
+        console.warn('saveData: No currentUser or db');
+        return;
+      }
       try {
         const { doc, setDoc } = window._fbFns;
         await setDoc(doc(window._fbDb, 'users', currentUser), { ...store, invoiceCounters,
           adminEmail: window._fbCurrentEmail }, { merge: true });
-      } catch (e) { console.warn('Firestore save error:', e); }
+        console.log('saveData success');
+      } catch (e) {
+        console.warn('Firestore save error:', e);
+        showToast('error', 'Data save failed! Check console.');
+      }
     }
 
+    // ─── AUTHENTICATION REAUTHENTICATION ──────────────────────────────────────
     async function verifyActionPassword(actionLabel = 'action') {
       if (!currentUser) { alert('Pehle login karein'); return false; }
       const entered = prompt(`${actionLabel} karne ke liye password daalein:`);
@@ -179,17 +211,18 @@
         const empUsername = localStorage.getItem('emp_session_username');
         if (!empUsername || !store.employees) return false;
         const employee = store.employees.find(e => e.username.toLowerCase() === empUsername.toLowerCase());
-        if (employee && entered === employee.password) {
-          return true;
-        } else {
-          alert('Galat employee password!');
-          return false;
+        if (employee) {
+          const hash = await hashPassword(entered);
+          if (hash === employee.passwordHash) return true;
         }
+        alert('Galat employee password!');
+        return false;
       } else {
         const user = window._fbAuth.currentUser;
         if (!user) return false;
         try {
-          await window._fbFns.signInWithEmailAndPassword(window._fbAuth, user.email, entered);
+          const credential = window._fbFns.EmailAuthProvider.credential(user.email, entered);
+          await window._fbFns.reauthenticateWithCredential(user, credential);
           return true;
         } catch (e) {
           alert('Galat admin password!');
@@ -198,6 +231,7 @@
       }
     }
 
+    // ─── AUTH UI ──────────────────────────────────────────────────────────────
     function setAuthMode(mode) {
       authMode = mode;
       const isSignup = mode === 'signup',
@@ -267,8 +301,185 @@
       }
     }
 
-    function loadSavedStore() { return structuredClone(defaultStore); }
+    // ─── EMPLOYEE MANAGEMENT ──────────────────────────────────────────────────
+    const employeesCollection = collection(db, 'employeeCredentials');
 
+    async function saveEmployeePassword() {
+      const username = document.getElementById('emp-setup-username').value.trim();
+      const p1 = document.getElementById('emp-setup-pass').value;
+      const p2 = document.getElementById('emp-setup-confirm').value;
+      if (!username || !p1) { alert('Saari fields bharein.'); return; }
+      if (p1 !== p2) { alert('Passwords match nahi ho rahe.'); return; }
+
+      if (store.employees.some(e => e.username.toLowerCase() === username.toLowerCase())) {
+        alert('Ye User ID pehle se bani hui hai!');
+        return;
+      }
+
+      const passwordHash = await hashPassword(p1);
+
+      store.employees.push({ username, passwordHash, status: 'active' });
+
+      try {
+        await addDoc(employeesCollection, {
+          adminUid: currentUser,
+          username: username,
+          passwordHash: passwordHash,
+          status: 'active'
+        });
+      } catch (e) {
+        console.warn('Failed to create employee credential doc:', e);
+        showToast('error', 'Could not save employee globally. Please try again.');
+        return;
+      }
+
+      await saveData();
+      closeEmpSetupModal();
+      renderEmployees();
+      showToast('success', 'Employee credentials created!');
+    }
+
+    async function deleteEmployeeRecord(idx) {
+      if (!confirm('Kya aap is employee account ko delete karna chahte hain?')) return;
+      if (!await verifyActionPassword('Delete Employee')) return;
+
+      const emp = store.employees[idx];
+      const currentEmp = localStorage.getItem('emp_session_username');
+      if (emp.username === currentEmp) {
+        logoutEmployee();
+      }
+
+      store.employees.splice(idx, 1);
+      try {
+        const q = query(employeesCollection, where('adminUid', '==', currentUser), where('username', '==', emp.username));
+        const snap = await getDocs(q);
+        snap.forEach(async (docSnap) => {
+          await deleteDoc(docSnap.ref);
+        });
+      } catch (e) {
+        console.warn('Failed to delete employee credential doc:', e);
+      }
+
+      await saveData();
+      renderEmployees();
+      showToast('success', 'Employee deleted.');
+    }
+
+    async function triggerEmployeeLoginSearch() {
+      const username = document.getElementById('auth-emp-username').value.trim();
+      const pass = document.getElementById('auth-pass').value;
+      if (!username || !pass) { alert('User ID aur Password dono dalein'); return; }
+
+      const btn = document.getElementById('auth-main-btn');
+      const origText = btn.textContent;
+      btn.textContent = 'Verifying...';
+      btn.disabled = true;
+
+      try {
+        const hash = await hashPassword(pass);
+        const q = query(employeesCollection, where('username', '==', username));
+        const snap = await getDocs(q);
+        if (snap.empty) {
+          alert('Employee username not found.');
+          btn.textContent = origText;
+          btn.disabled = false;
+          return;
+        }
+
+        let found = false;
+        snap.forEach(docSnap => {
+          const data = docSnap.data();
+          if (data.passwordHash === hash) {
+            found = true;
+            const adminUid = data.adminUid;
+            localStorage.setItem('emp_session_admin_uid', adminUid);
+            localStorage.setItem('emp_session_username', data.username);
+            loadEmployeeSession();
+          }
+        });
+
+        if (!found) {
+          alert('Galat password!');
+        }
+      } catch (e) {
+        alert('Login failed: ' + e.message);
+      } finally {
+        btn.textContent = origText;
+        btn.disabled = false;
+      }
+    }
+
+    async function loadEmployeeSession() {
+      currentUser = localStorage.getItem('emp_session_admin_uid');
+      const empUser = localStorage.getItem('emp_session_username');
+      isEmployeeMode = true;
+
+      await window._fbLoadStore();
+      invoiceCounters = loadInvoiceCounters();
+      window._fbCurrentEmail = store.adminEmail || '';
+
+      document.body.classList.remove('auth-locked');
+      document.body.classList.add('employee-mode');
+
+      document.getElementById('current-user-label').textContent = `${empUser} (Staff)`;
+      document.getElementById('logout-btn-header').style.display = 'none';
+
+      document.querySelectorAll('.nav-item').forEach(btn => {
+        const page = btn.getAttribute('data-page');
+        if (!employeeAllowedPages.includes(page)) {
+          btn.classList.add('emp-disabled');
+          btn.style.opacity = '0.4';
+        }
+      });
+
+      document.getElementById('sidebar-emp-section').style.display = 'block';
+      document.getElementById('emp-mode-indicator').style.display = 'inline-flex';
+      document.getElementById('exit-emp-btn-header').style.display = 'inline-flex';
+
+      updateProductList();
+      showPage('sales', document.querySelector('[data-page="sales"]'));
+    }
+
+    function logoutEmployee() {
+      localStorage.removeItem('emp_session_admin_uid');
+      localStorage.removeItem('emp_session_username');
+      isEmployeeMode = false;
+      window.location.reload();
+    }
+
+    // ─── AUTH STATE OBSERVER ──────────────────────────────────────────────────
+    onAuthStateChanged(auth, async (user) => {
+      if (localStorage.getItem('emp_session_admin_uid')) {
+        await loadEmployeeSession();
+        return;
+      }
+
+      if (user) {
+        currentUser = user.uid;
+        window._fbCurrentEmail = user.email;
+        await window._fbLoadStore();
+        if (!store.adminEmail || store.adminEmail !== user.email) {
+          store.adminEmail = user.email;
+          saveData();
+        }
+        invoiceCounters = loadInvoiceCounters();
+        document.body.classList.remove('auth-locked');
+        document.getElementById('current-user-label').textContent = user.email;
+        updateProductList();
+        renderDashboard();
+        updateEmployeesNavUI();
+        setTimeout(applyReturnFilters, 200);
+      } else {
+        currentUser = null;
+        window._fbCurrentEmail = null;
+        store = structuredClone(defaultStore);
+        invoiceCounters = { sale: 1, purchase: 1 };
+        document.body.classList.add('auth-locked');
+        setAuthMode('login');
+      }
+    });
+
+    // ─── UTILITY FUNCTIONS ────────────────────────────────────────────────────
     function getNextCounter(prefix, rows) {
       const numbers = rows.map(row => {
         const match = String(row.invoiceNo || '').match(new RegExp('^' + prefix + '0*(\\d+)$'));
@@ -280,8 +491,6 @@
     function loadInvoiceCounters() {
       return { sale: getNextCounter('INV-', store.sales), purchase: getNextCounter('PUR-', store.purchases) };
     }
-
-    invoiceCounters = loadInvoiceCounters();
 
     function calcItem(i) {
       const qty = parseFloat(i.qty) || 0,
@@ -311,6 +520,13 @@
         year: 'numeric' });
     }
 
+    function badge(s) { return `<span class="badge ${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</span>`; }
+
+    function findProduct(name) {
+      return store.products.find(p => p.name.toLowerCase() === String(name).trim().toLowerCase());
+    }
+
+    // ─── PAGE NAVIGATION ──────────────────────────────────────────────────────
     function showPage(id, el) {
       if (isEmployeeMode && !employeeAllowedPages.includes(id)) {
         return;
@@ -339,6 +555,7 @@
       if (id === 'returns') renderReturns();
     }
 
+    // ─── RENDER FUNCTIONS ────────────────────────────────────────────────────
     function renderDashboard() {
       const sTotal = store.sales.reduce((a, s) => a + calcTotals(s.items).total, 0);
       const pTotal = store.purchases.reduce((a, p) => a + calcTotals(p.items).total, 0);
@@ -357,8 +574,6 @@
         `<tr><td>${p.party}</td><td class="cell-strong">${fmt(calcTotals(p.items).total)}</td><td>${badge(p.status)}</td></tr>`
         ).join('');
     }
-
-    function badge(s) { return `<span class="badge ${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</span>`; }
 
     function renderTable(type) {
       const data = store[type === 'sales' ? 'sales' : 'purchases'];
@@ -385,7 +600,7 @@
       openModal(modalType, index);
     }
 
-    /* ── RETURN FILTER ── */
+    // ─── RETURNS ──────────────────────────────────────────────────────────────
     function setReturnType(type, btn) {
       returnFilterType = type;
       document.querySelectorAll('#returnTypeFilter .btn').forEach(b => b.classList.remove('active'));
@@ -410,400 +625,6 @@
       renderReturns();
     }
 
-    /* ── ECOMMERCE RETURNS with PACKING STOCK ── */
-    function openReturnModal(idx = -1) {
-      editReturnIndex = idx;
-      const today = new Date().toISOString().split('T')[0];
-      if (idx >= 0) {
-        const r = store.ecomReturns[idx];
-        document.getElementById('ret-platform').value = r.platform;
-        document.getElementById('ret-orderid').value = r.orderId;
-        document.getElementById('ret-pname').value = r.productName;
-        document.getElementById('ret-date').value = r.date;
-        document.getElementById('ret-type').value = r.type;
-        document.getElementById('ret-status').value = r.status;
-        document.getElementById('ret-amount').value = r.amount || 0;
-        document.getElementById('return-modal-title').textContent = "Edit Return Record";
-      } else {
-        document.getElementById('ret-platform').value = 'meesho';
-        document.getElementById('ret-orderid').value = '';
-        document.getElementById('ret-pname').value = '';
-        document.getElementById('ret-date').value = today;
-        document.getElementById('ret-type').value = 'Customer Return';
-        document.getElementById('ret-status').value = 'pending';
-        document.getElementById('ret-amount').value = '0';
-        document.getElementById('return-modal-title').textContent = "Log E-Commerce Return";
-      }
-      document.getElementById('return-modal').classList.add('open');
-    }
-
-    function closeReturnModal() {
-      document.getElementById('return-modal').classList.remove('open');
-    }
-
-    async function saveReturn() {
-      const platform = document.getElementById('ret-platform').value;
-      const orderId = document.getElementById('ret-orderid').value.trim();
-      const productName = document.getElementById('ret-pname').value.trim();
-      const date = document.getElementById('ret-date').value;
-      const type = document.getElementById('ret-type').value;
-      const status = document.getElementById('ret-status').value;
-      const amount = parseFloat(document.getElementById('ret-amount').value) || 0;
-
-      if (!orderId || !productName) {
-        alert('Order ID/AWB aur Product Name daalna compulsory hai!');
-        return;
-      }
-
-      const payload = { platform, orderId, productName, date, type, status, amount };
-
-      // RTO: total stock +1 and packing stock +1
-      if (type === 'RTO (Courier Return)') {
-        const prod = findProduct(productName);
-        if (prod) {
-          prod.stock = (prod.stock || 0) + 1;
-          prod.packingStock = (prod.packingStock || 0) + 1;
-          showToast('success', `Stock +1, Packing +1 for ${productName} (RTO)`);
-        }
-      }
-
-      if (!store.ecomReturns) store.ecomReturns = [];
-
-      if (editReturnIndex >= 0) {
-        store.ecomReturns[editReturnIndex] = payload;
-        showToast('success', 'Return record updated successfully!');
-      } else {
-        store.ecomReturns.push(payload);
-        showToast('success', 'New Return record logged!');
-      }
-
-      await saveData();
-      closeReturnModal();
-      renderReturns();
-    }
-
-    /* ── BULK RETURN ── */
-    function openBulkReturnModal() {
-      document.getElementById('bulk-rows-body').innerHTML = '';
-      for (let i = 0; i < 3; i++) {
-        addBulkRow();
-      }
-      updateBulkCount();
-      document.getElementById('bulk-return-modal').classList.add('open');
-    }
-
-    function closeBulkReturnModal() {
-      document.getElementById('bulk-return-modal').classList.remove('open');
-    }
-
-    function addBulkRow(data = {}) {
-      const today = new Date().toISOString().split('T')[0];
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-          <td>
-            <select class="bulk-platform">
-              <option value="meesho" ${data.platform==='meesho'?'selected':''}>Meesho</option>
-              <option value="amazon" ${data.platform==='amazon'?'selected':''}>Amazon</option>
-              <option value="flipkart" ${data.platform==='flipkart'?'selected':''}>Flipkart</option>
-              <option value="myntra" ${data.platform==='myntra'?'selected':''}>Myntra</option>
-              <option value="flex" ${data.platform==='flex'?'selected':''}>Flex</option>
-            </select>
-          </td>
-          <td><input type="text" class="bulk-orderid" value="${data.orderId||''}" placeholder="Order ID/AWB"></td>
-          <td><input type="text" class="bulk-pname" value="${data.productName||''}" placeholder="Product name"></td>
-          <td><input type="date" class="bulk-date" value="${data.date||today}"></td>
-          <td>
-            <select class="bulk-type">
-              <option value="Customer Return" ${data.type==='Customer Return'?'selected':''}>Customer Return</option>
-              <option value="RTO (Courier Return)" ${data.type==='RTO (Courier Return)'?'selected':''}>RTO (Courier Return)</option>
-            </select>
-          </td>
-          <td>
-            <select class="bulk-status">
-              <option value="pending" ${data.status==='pending'?'selected':''}>Pending</option>
-              <option value="received" ${data.status==='received'?'selected':''}>Received</option>
-              <option value="damaged" ${data.status==='damaged'?'selected':''}>Damaged</option>
-              <option value="claim_filed" ${data.status==='claim_filed'?'selected':''}>Claim Filed</option>
-              <option value="claim_approved" ${data.status==='claim_approved'?'selected':''}>Claim Approved</option>
-            </select>
-          </td>
-          <td><input type="number" class="bulk-amount" value="${data.amount||0}" min="0" step="1" placeholder="0"></td>
-          <td><button class="btn sm danger" onclick="removeBulkRow(this)"><i class="ti ti-trash"></i></button></td>
-        `;
-      document.getElementById('bulk-rows-body').appendChild(tr);
-      updateBulkCount();
-    }
-
-    function removeBulkRow(btn) {
-      const tr = btn.closest('tr');
-      if (document.getElementById('bulk-rows-body').children.length <= 1) {
-        alert('Kam se kam ek row hona chahiye.');
-        return;
-      }
-      tr.remove();
-      updateBulkCount();
-    }
-
-    function clearBulkRows() {
-      if (!confirm('Saari rows clear kar den? (Save nahi hui rows delete ho jayengi)')) return;
-      document.getElementById('bulk-rows-body').innerHTML = '';
-      addBulkRow();
-      updateBulkCount();
-    }
-
-    function updateBulkCount() {
-      const count = document.getElementById('bulk-rows-body').children.length;
-      document.getElementById('bulk-count').textContent = count;
-    }
-
-    async function saveBulkReturns() {
-      const rows = document.querySelectorAll('#bulk-rows-body tr');
-      const entries = [];
-      let hasError = false;
-      rows.forEach(tr => {
-        const platform = tr.querySelector('.bulk-platform').value;
-        const orderId = tr.querySelector('.bulk-orderid').value.trim();
-        const productName = tr.querySelector('.bulk-pname').value.trim();
-        const date = tr.querySelector('.bulk-date').value;
-        const type = tr.querySelector('.bulk-type').value;
-        const status = tr.querySelector('.bulk-status').value;
-        const amount = parseFloat(tr.querySelector('.bulk-amount').value) || 0;
-
-        if (!orderId || !productName || !date) {
-          hasError = true;
-          tr.style.backgroundColor = '#ffeeee';
-        } else {
-          tr.style.backgroundColor = '';
-          entries.push({ platform, orderId, productName, date, type, status, amount });
-          if (type === 'RTO (Courier Return)') {
-            const prod = findProduct(productName);
-            if (prod) {
-              prod.stock = (prod.stock || 0) + 1;
-              prod.packingStock = (prod.packingStock || 0) + 1;
-            }
-          }
-        }
-      });
-
-      if (hasError) {
-        alert('Kuch rows mein Order ID, Product Name ya Date missing hai. Red highlight wali rows ko theek karein.');
-        return;
-      }
-
-      if (!entries.length) {
-        alert('Koi valid entry nahi hai.');
-        return;
-      }
-
-      if (!confirm(`Kya aap ${entries.length} returns save karna chahte hain?`)) return;
-
-      if (!store.ecomReturns) store.ecomReturns = [];
-      store.ecomReturns.push(...entries);
-
-      await saveData();
-      closeBulkReturnModal();
-      renderReturns();
-      showToast('success', `${entries.length} returns bulk added! Stock & Packing updated for RTO items.`);
-    }
-
-    /* ─── ORDER MATCH (ONLY RTO) with TOTAL & PACKING STOCK ─── */
-    function openOrderMatchModal() {
-      document.getElementById('order-list-input').value = '';
-      document.getElementById('match-result-area').style.display = 'none';
-      document.getElementById('order-match-modal').classList.add('open');
-    }
-
-    function closeOrderMatchModal() {
-      document.getElementById('order-match-modal').classList.remove('open');
-    }
-
-    function getAvailableRTOProducts() {
-      const result = [];
-      store.products.forEach(p => {
-        const packing = p.packingStock || 0;
-        if (packing > 0) {
-          result.push({ name: p.name, stock: p.stock || 0, packingStock: packing });
-        }
-      });
-      return result;
-    }
-
-    function performMatch() {
-      const input = document.getElementById('order-list-input').value;
-      if (!input.trim()) {
-        alert('Kuch product names daalein!');
-        return;
-      }
-      const orderNames = input.split('\n').map(s => s.trim()).filter(s => s);
-      if (!orderNames.length) {
-        alert('Koi valid product name nahi mila.');
-        return;
-      }
-
-      const available = getAvailableRTOProducts();
-      if (!available.length) {
-        document.getElementById('match-result-area').innerHTML =
-          `<div class="empty">❌ Koi product packing stock (RTO) mein nahi hai. Pehle RTO log karein.</div>`;
-        document.getElementById('match-result-area').style.display = 'block';
-        return;
-      }
-
-      const matches = [];
-      orderNames.forEach(orderName => {
-        let found = null;
-        for (let av of available) {
-          if (av.name.toLowerCase().includes(orderName.toLowerCase()) || orderName.toLowerCase().includes(av.name
-              .toLowerCase())) {
-            found = av;
-            break;
-          }
-        }
-        matches.push({ orderName, matched: found });
-      });
-
-      let html = `<h3 style="margin-bottom:10px;">📊 Matching Results</h3><table>
-          <thead><tr><th>New Order Name</th><th>Match Status</th><th>Total Stock</th><th>📦 Packing Stock (RTO)</th><th>Action</th></tr></thead><tbody>`;
-      matches.forEach((m, idx) => {
-        if (m.matched) {
-          const packingClass = m.matched.packingStock > 0 ? 'stock-packing' : 'stock-packing empty';
-          html += `<tr>
-              <td><strong>${esc(m.orderName)}</strong></td>
-              <td><span class="match-badge">✅ Matched</span> <span class="rto-badge">RTO</span></td>
-              <td class="stock-total">${m.matched.stock}</td>
-              <td class="${packingClass}">${m.matched.packingStock}</td>
-              <td><button class="btn sm primary" onclick="sellMatchedProduct('${esc(m.matched.name)}')"><i class="ti ti-file-invoice"></i> Sell Now</button></td>
-            </tr>`;
-        } else {
-          html += `<tr>
-              <td><strong>${esc(m.orderName)}</strong></td>
-              <td><span class="no-match">❌ No match in RTO stock</span></td>
-              <td>-</td><td>-</td>
-              <td><button class="btn sm" disabled style="opacity:0.5;">Not Available</button></td>
-            </tr>`;
-        }
-      });
-      html += `</tbody></table>`;
-      document.getElementById('match-result-area').innerHTML = html;
-      document.getElementById('match-result-area').style.display = 'block';
-    }
-
-    // Sell matched product (deducts packing stock)
-    function sellMatchedProduct(productName) {
-      const prod = findProduct(productName);
-      if (!prod) {
-        alert('Product master mein nahi mila!');
-        return;
-      }
-      const packing = prod.packingStock || 0;
-      if (packing <= 0) {
-        alert('Is product ki packing stock (RTO) khatam ho gayi!');
-        return;
-      }
-      if ((prod.stock || 0) <= 0) {
-        alert('Total stock khatam ho gaya!');
-        return;
-      }
-
-      let customer = 'RTO Customer';
-      const exists = store.customers.some(c => c.name === customer);
-      if (!exists) {
-        store.customers.push({ name: customer, phone: '0000000000', gstin: '', address: 'RTO Returns' });
-        saveData().catch(e => console.warn('Customer save error:', e));
-      }
-
-      openModal('sale');
-      setTimeout(() => {
-        const quickProduct = document.getElementById('quick-product');
-        const quickQty = document.getElementById('quick-qty');
-        if (quickProduct && quickQty) {
-          quickProduct.value = prod.name;
-          quickQty.value = 1;
-          document.querySelector('.quick-add-row .btn.primary')?.click();
-        }
-        const partyField = document.getElementById('f-party');
-        if (partyField) {
-          partyField.value = customer;
-        }
-        document.getElementById('f-party')?.focus();
-        closeOrderMatchModal();
-        window._pendingPackingDeduct = { name: prod.name };
-      }, 250);
-    }
-
-    /* ─── SAVE ENTRY with packing deduction ─── */
-    async function saveEntry() {
-      const party = document.getElementById('f-party').value.trim();
-      const prefix = document.getElementById('f-bill-prefix').value.trim();
-      const num = document.getElementById('f-billno').value.trim();
-      const date = document.getElementById('f-date').value;
-      const due = document.getElementById('f-due').value;
-      const status = document.getElementById('f-status').value;
-      const notes = document.getElementById('f-notes').value.trim();
-      const phone = document.getElementById('f-phone').value;
-
-      if (!party || !num || !date) { alert('Party name, bill number aur date daalna zaruri hai.'); return; }
-
-      const items = [];
-      document.querySelectorAll('#items-body tr').forEach(tr => {
-        const name = tr.querySelector('.i-name').value.trim();
-        const qty = parseFloat(tr.querySelector('.i-qty').value) || 0;
-        const unit = tr.querySelector('.i-unit').value.trim();
-        const price = parseFloat(tr.querySelector('.i-price').value) || 0;
-        const gst = parseFloat(tr.querySelector('.i-gst').value) || 0;
-        if (name) items.push({ name, qty, unit, price, gst });
-      });
-
-      if (!items.length) { alert('Kam se kam ek item add karein.'); return; }
-
-      const invoiceNo = prefix + num;
-      const typeKey = currentType === 'sale' ? 'sales' : 'purchases';
-      const entry = { invoiceNo, party, date, due, status, notes, phone, items };
-
-      if (editIndex >= 0) {
-        const oldEntry = store[typeKey][editIndex];
-        if (currentType === 'sale') adjustStockForInvoices(oldEntry.items, 'add');
-        else adjustStockForInvoices(oldEntry.items, 'sub');
-
-        store[typeKey][editIndex] = entry;
-      } else {
-        store[typeKey].push(entry);
-        if (currentType === 'sale') invoiceCounters.sale = Math.max(invoiceCounters.sale, Number(num) + 1);
-        else invoiceCounters.purchase = Math.max(invoiceCounters.purchase, Number(num) + 1);
-      }
-
-      if (currentType === 'sale') adjustStockForInvoices(items, 'sub');
-      else adjustStockForInvoices(items, 'add');
-
-      await saveData();
-
-      // Deduct packing stock if sale is to RTO Customer
-      if (party === 'RTO Customer' && window._pendingPackingDeduct) {
-        const prod = findProduct(window._pendingPackingDeduct.name);
-        if (prod) {
-          prod.packingStock = Math.max(0, (prod.packingStock || 0) - 1);
-          await saveData();
-          showToast('info', `📦 Packing stock -1 for ${prod.name}`);
-        }
-        window._pendingPackingDeduct = null;
-      }
-
-      closeModal();
-      showPage(currentType === 'sale' ? 'sales' : 'purchase', document.querySelector(
-        `[data-page="${currentType === 'sale' ? 'sales' : 'purchase'}"]`));
-      showToast('success', 'Entry saved successfully!');
-    }
-
-    function adjustStockForInvoices(items, action) {
-      items.forEach(it => {
-        const p = findProduct(it.name);
-        if (p) {
-          if (action === 'add') p.stock = (p.stock || 0) + it.qty;
-          else p.stock = Math.max(0, (p.stock || 0) - it.qty);
-        }
-      });
-    }
-
-    /* ─── EXISTING FUNCTIONS (unchanged) ─── */
     function renderReturns() {
       const tbody = document.getElementById('returns-tbody');
       let data = store.ecomReturns || [];
@@ -828,7 +649,6 @@
       }
 
       const originalIndices = [];
-      let tempIdx = 0;
       (store.ecomReturns || []).forEach((r, i) => {
         let match = true;
         if (returnFilterType === 'courier' && !(r.type && r.type.includes('RTO'))) match = false;
@@ -909,9 +729,7 @@
         saveData().catch(e => console.warn('Customer save error:', e));
       }
 
-      openModal('sale');
-
-      setTimeout(() => {
+      openModal('sale', -1, () => {
         const quickProduct = document.getElementById('quick-product');
         const quickQty = document.getElementById('quick-qty');
         if (quickProduct && quickQty) {
@@ -924,9 +742,521 @@
           partyField.value = defaultCustomer;
         }
         document.getElementById('f-party')?.focus();
-      }, 250);
+      });
     }
 
+    // ─── FIX: RETURN MODAL OPEN/SAVE with robust index handling ──────────────
+    function openReturnModal(idx = -1) {
+      editReturnIndex = idx;
+      updateProductList();
+      const today = new Date().toISOString().split('T')[0];
+      const modal = document.getElementById('return-modal');
+      modal.dataset.editIndex = idx;
+
+      if (idx >= 0) {
+        const r = store.ecomReturns[idx];
+        document.getElementById('ret-platform').value = r.platform || 'meesho';
+        document.getElementById('ret-orderid').value = r.orderId || '';
+        document.getElementById('ret-pname').value = r.productName || '';
+        document.getElementById('ret-date').value = r.date || today;
+        document.getElementById('ret-type').value = r.type || 'Customer Return';
+        document.getElementById('ret-status').value = r.status || 'pending';
+        document.getElementById('ret-amount').value = r.amount || 0;
+        document.getElementById('return-modal-title').textContent = "Edit Return Record";
+      } else {
+        document.getElementById('ret-platform').value = 'meesho';
+        document.getElementById('ret-orderid').value = '';
+        document.getElementById('ret-pname').value = '';
+        document.getElementById('ret-date').value = today;
+        document.getElementById('ret-type').value = 'Customer Return';
+        document.getElementById('ret-status').value = 'pending';
+        document.getElementById('ret-amount').value = '0';
+        document.getElementById('return-modal-title').textContent = "Log E-Commerce Return";
+      }
+      modal.classList.add('open');
+      setTimeout(() => document.getElementById('ret-orderid').focus(), 100);
+    }
+
+    function closeReturnModal() {
+      document.getElementById('return-modal').classList.remove('open');
+    }
+
+    // ─── SAVE RETURN (FIXED) ──────────────────────────────────────────────────
+    async function saveReturn() {
+      console.log('saveReturn called');
+      try {
+        const modal = document.getElementById('return-modal');
+        let idx = parseInt(modal.dataset.editIndex);
+        if (isNaN(idx)) idx = -1;
+
+        const platform = document.getElementById('ret-platform').value;
+        const orderId = document.getElementById('ret-orderid').value.trim();
+        const productName = document.getElementById('ret-pname').value.trim();
+        const date = document.getElementById('ret-date').value;
+        const type = document.getElementById('ret-type').value;
+        const status = document.getElementById('ret-status').value;
+        const amount = parseFloat(document.getElementById('ret-amount').value) || 0;
+
+        if (!orderId || !productName) {
+          alert('Order ID/AWB aur Product Name daalna compulsory hai!');
+          return;
+        }
+
+        const payload = { platform, orderId, productName, date, type, status, amount };
+
+        if (type === 'RTO (Courier Return)') {
+          const prod = findProduct(productName);
+          if (prod) {
+            prod.stock = (prod.stock || 0) + 1;
+            prod.packingStock = (prod.packingStock || 0) + 1;
+            showToast('success', `Stock +1, Packing +1 for ${productName} (RTO)`);
+          }
+        }
+
+        if (!store.ecomReturns) store.ecomReturns = [];
+
+        if (idx >= 0 && idx < store.ecomReturns.length) {
+          store.ecomReturns[idx] = payload;
+          showToast('success', 'Return record updated successfully!');
+        } else {
+          store.ecomReturns.push(payload);
+          showToast('success', 'New Return record logged!');
+        }
+
+        await saveData();
+        closeReturnModal();
+        renderReturns();
+        console.log('saveReturn completed');
+      } catch (error) {
+        console.error('Error saving return:', error);
+        showToast('error', 'Failed to save return. Please try again.');
+      }
+    }
+
+    // ─── BULK RETURN ──────────────────────────────────────────────────────────
+    function openBulkReturnModal() {
+      updateProductList();
+      document.getElementById('bulk-rows-body').innerHTML = '';
+      for (let i = 0; i < 3; i++) {
+        addBulkRow();
+      }
+      updateBulkCount();
+      document.getElementById('bulk-return-modal').classList.add('open');
+    }
+
+    function closeBulkReturnModal() {
+      document.getElementById('bulk-return-modal').classList.remove('open');
+    }
+
+    function addBulkRow(data = {}) {
+      const today = new Date().toISOString().split('T')[0];
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+          <td>
+            <select class="bulk-platform">
+              <option value="meesho" ${data.platform==='meesho'?'selected':''}>Meesho</option>
+              <option value="amazon" ${data.platform==='amazon'?'selected':''}>Amazon</option>
+              <option value="flipkart" ${data.platform==='flipkart'?'selected':''}>Flipkart</option>
+              <option value="myntra" ${data.platform==='myntra'?'selected':''}>Myntra</option>
+              <option value="flex" ${data.platform==='flex'?'selected':''}>Flex</option>
+            </select>
+          </td>
+          <td><input type="text" class="bulk-orderid" value="${data.orderId||''}" placeholder="Order ID/AWB"></td>
+          <td><input type="text" class="bulk-pname" list="product-list" value="${data.productName||''}" placeholder="Type or select product"></td>
+          <td><input type="date" class="bulk-date" value="${data.date||today}"></td>
+          <td>
+            <select class="bulk-type">
+              <option value="Customer Return" ${data.type==='Customer Return'?'selected':''}>Customer Return</option>
+              <option value="RTO (Courier Return)" ${data.type==='RTO (Courier Return)'?'selected':''}>RTO (Courier Return)</option>
+            </select>
+          </td>
+          <td>
+            <select class="bulk-status">
+              <option value="pending" ${data.status==='pending'?'selected':''}>Pending</option>
+              <option value="received" ${data.status==='received'?'selected':''}>Received</option>
+              <option value="damaged" ${data.status==='damaged'?'selected':''}>Damaged</option>
+              <option value="claim_filed" ${data.status==='claim_filed'?'selected':''}>Claim Filed</option>
+              <option value="claim_approved" ${data.status==='claim_approved'?'selected':''}>Claim Approved</option>
+            </select>
+          </td>
+          <td><input type="number" class="bulk-amount" value="${data.amount||0}" min="0" step="1" placeholder="0"></td>
+          <td><button class="btn sm danger" onclick="removeBulkRow(this)"><i class="ti ti-trash"></i></button></td>
+        `;
+      document.getElementById('bulk-rows-body').appendChild(tr);
+      updateBulkCount();
+    }
+
+    function removeBulkRow(btn) {
+      const tr = btn.closest('tr');
+      if (document.getElementById('bulk-rows-body').children.length <= 1) {
+        alert('Kam se kam ek row hona chahiye.');
+        return;
+      }
+      tr.remove();
+      updateBulkCount();
+    }
+
+    function clearBulkRows() {
+      if (!confirm('Saari rows clear kar den? (Save nahi hui rows delete ho jayengi)')) return;
+      document.getElementById('bulk-rows-body').innerHTML = '';
+      addBulkRow();
+      updateBulkCount();
+    }
+
+    function updateBulkCount() {
+      const count = document.getElementById('bulk-rows-body').children.length;
+      document.getElementById('bulk-count').textContent = count;
+    }
+
+    async function saveBulkReturns() {
+      const rows = document.querySelectorAll('#bulk-rows-body tr');
+      const entries = [];
+      let hasError = false;
+      rows.forEach(tr => {
+        const platform = tr.querySelector('.bulk-platform').value;
+        const orderId = tr.querySelector('.bulk-orderid').value.trim();
+        const productName = tr.querySelector('.bulk-pname').value.trim();
+        const date = tr.querySelector('.bulk-date').value;
+        const type = tr.querySelector('.bulk-type').value;
+        const status = tr.querySelector('.bulk-status').value;
+        const amount = parseFloat(tr.querySelector('.bulk-amount').value) || 0;
+
+        if (!platform || !orderId || !productName || !date) {
+          hasError = true;
+          tr.style.backgroundColor = '#ffeeee';
+        } else {
+          tr.style.backgroundColor = '';
+          entries.push({ platform, orderId, productName, date, type, status, amount });
+          if (type === 'RTO (Courier Return)') {
+            const prod = findProduct(productName);
+            if (prod) {
+              prod.stock = (prod.stock || 0) + 1;
+              prod.packingStock = (prod.packingStock || 0) + 1;
+            }
+          }
+        }
+      });
+
+      if (hasError) {
+        alert('Kuch rows mein Platform, Order ID, Product Name ya Date missing hai. Red highlight wali rows ko theek karein.');
+        return;
+      }
+
+      if (!entries.length) {
+        alert('Koi valid entry nahi hai.');
+        return;
+      }
+
+      if (!confirm(`Kya aap ${entries.length} returns save karna chahte hain?`)) return;
+
+      if (!store.ecomReturns) store.ecomReturns = [];
+      store.ecomReturns.push(...entries);
+
+      await saveData();
+      closeBulkReturnModal();
+      renderReturns();
+      showToast('success', `${entries.length} returns bulk added! Stock & Packing updated for RTO items.`);
+    }
+
+    // ─── ORDER MATCH ──────────────────────────────────────────────────────────
+    function openOrderMatchModal() {
+      document.getElementById('order-list-input').value = '';
+      document.getElementById('match-result-area').style.display = 'none';
+      document.getElementById('order-match-modal').classList.add('open');
+    }
+
+    function closeOrderMatchModal() {
+      document.getElementById('order-match-modal').classList.remove('open');
+    }
+
+    function getAvailableRTOProducts() {
+      const result = [];
+      store.products.forEach(p => {
+        const packing = p.packingStock || 0;
+        if (packing > 0) {
+          result.push({ name: p.name, stock: p.stock || 0, packingStock: packing });
+        }
+      });
+      return result;
+    }
+
+    function performMatch() {
+      const input = document.getElementById('order-list-input').value;
+      if (!input.trim()) {
+        alert('Kuch product names daalein!');
+        return;
+      }
+      const orderNames = input.split('\n').map(s => s.trim()).filter(s => s);
+      if (!orderNames.length) {
+        alert('Koi valid product name nahi mila.');
+        return;
+      }
+
+      const available = getAvailableRTOProducts();
+      if (!available.length) {
+        document.getElementById('match-result-area').innerHTML =
+          `<div class="empty">❌ Koi product packing stock (RTO) mein nahi hai. Pehle RTO log karein.</div>`;
+        document.getElementById('match-result-area').style.display = 'block';
+        return;
+      }
+
+      const matches = [];
+      orderNames.forEach(orderName => {
+        let found = null;
+        for (let av of available) {
+          if (av.name.toLowerCase().includes(orderName.toLowerCase()) || orderName.toLowerCase().includes(av.name
+              .toLowerCase())) {
+            found = av;
+            break;
+          }
+        }
+        matches.push({ orderName, matched: found });
+      });
+
+      let html = `<h3 style="margin-bottom:10px;">📊 Matching Results</h3><table>
+          <thead><tr><th>New Order Name</th><th>Match Status</th><th>Total Stock</th><th>📦 Packing Stock (RTO)</th><th>Action</th></tr></thead><tbody>`;
+      matches.forEach((m, idx) => {
+        if (m.matched) {
+          const packingClass = m.matched.packingStock > 0 ? 'stock-packing' : 'stock-packing empty';
+          html += `<tr>
+              <td><strong>${esc(m.orderName)}</strong></td>
+              <td><span class="match-badge">✅ Matched</span> <span class="rto-badge">RTO</span></td>
+              <td class="stock-total">${m.matched.stock}</td>
+              <td class="${packingClass}">${m.matched.packingStock}</td>
+              <td><button class="btn sm primary" onclick="sellMatchedProduct('${esc(m.matched.name)}')"><i class="ti ti-file-invoice"></i> Sell Now</button></td>
+            </tr>`;
+        } else {
+          html += `<tr>
+              <td><strong>${esc(m.orderName)}</strong></td>
+              <td><span class="no-match">❌ No match in RTO stock</span></td>
+              <td>-</td><td>-</td>
+              <td><button class="btn sm" disabled style="opacity:0.5;">Not Available</button></td>
+            </tr>`;
+        }
+      });
+      html += `</tbody></table>`;
+      document.getElementById('match-result-area').innerHTML = html;
+      document.getElementById('match-result-area').style.display = 'block';
+    }
+
+    function sellMatchedProduct(productName) {
+      const prod = findProduct(productName);
+      if (!prod) {
+        alert('Product master mein nahi mila!');
+        return;
+      }
+      const packing = prod.packingStock || 0;
+      if (packing <= 0) {
+        alert('Is product ki packing stock (RTO) khatam ho gayi!');
+        return;
+      }
+      if ((prod.stock || 0) <= 0) {
+        alert('Total stock khatam ho gaya!');
+        return;
+      }
+
+      let customer = 'RTO Customer';
+      const exists = store.customers.some(c => c.name === customer);
+      if (!exists) {
+        store.customers.push({ name: customer, phone: '0000000000', gstin: '', address: 'RTO Returns' });
+        saveData().catch(e => console.warn('Customer save error:', e));
+      }
+
+      openModal('sale', -1, () => {
+        const quickProduct = document.getElementById('quick-product');
+        const quickQty = document.getElementById('quick-qty');
+        if (quickProduct && quickQty) {
+          quickProduct.value = prod.name;
+          quickQty.value = 1;
+          document.querySelector('.quick-add-row .btn.primary')?.click();
+        }
+        const partyField = document.getElementById('f-party');
+        if (partyField) {
+          partyField.value = customer;
+        }
+        document.getElementById('f-party')?.focus();
+        closeOrderMatchModal();
+        window._pendingPackingDeduct = { name: prod.name };
+      });
+    }
+
+    // ─── INVOICE / BILL ENTRY ──────────────────────────────────────────────────
+    function openModal(type, idx = -1, onOpenCallback) {
+      currentType = type;
+      editIndex = idx;
+      const isSale = type === 'sale';
+      document.getElementById('modal-title').textContent = idx >= 0 ? (isSale ? 'Edit Invoice' : 'Edit Purchase Bill') :
+        (isSale ? 'Create Invoice' : 'Create Purchase Bill');
+      document.getElementById('party-label').textContent = isSale ? 'Customer Name' : 'Vendor Name';
+      const parties = isSale ? store.customers : store.vendors;
+      document.getElementById('party-list').innerHTML = parties.map(p => `<option value="${p.name}">`).join('');
+      updateProductList();
+      const today = new Date().toISOString().split('T')[0];
+      if (idx >= 0) {
+        const r = isSale ? store.sales[idx] : store.purchases[idx];
+        const parts = splitBillNo(r.invoiceNo, isSale ? 'INV-' : 'PUR-');
+        document.getElementById('f-party').value = r.party;
+        document.getElementById('f-bill-prefix').value = parts.prefix;
+        document.getElementById('f-billno').value = parts.number;
+        document.getElementById('f-date').value = r.date;
+        document.getElementById('f-due').value = r.due;
+        const partyData = parties.find(p => p.name === r.party);
+        document.getElementById('f-phone').value = r.phone || (partyData ? partyData.phone : '');
+        document.getElementById('f-status').value = r.status;
+        document.getElementById('f-notes').value = r.notes;
+        document.getElementById('items-body').innerHTML = '';
+        r.items.forEach(it => addItemRow(it));
+      } else {
+        document.getElementById('f-party').value = '';
+        document.getElementById('f-bill-prefix').value = isSale ? 'INV-' : 'PUR-';
+        document.getElementById('f-billno').value = String(isSale ? invoiceCounters.sale : invoiceCounters.purchase);
+        document.getElementById('f-date').value = today;
+        document.getElementById('f-due').value = '';
+        document.getElementById('f-phone').value = '';
+        document.getElementById('f-status').value = 'pending';
+        document.getElementById('f-notes').value = '';
+        document.getElementById('items-body').innerHTML = '';
+      }
+      updateTotals();
+      document.getElementById('invoice-modal').classList.add('open');
+      setTimeout(() => document.getElementById('f-party').focus(), 100);
+      if (onOpenCallback) {
+        setTimeout(onOpenCallback, 300);
+      }
+    }
+
+    function closeModal() {
+      document.getElementById('invoice-modal').classList.remove('open');
+      editIndex = -1;
+    }
+
+    function splitBillNo(value, fallbackPrefix) {
+      const match = String(value || '').match(/^([A-Za-z]+-?0*)(.*)$/);
+      if (!match) return { prefix: fallbackPrefix, number: value || '' };
+      return { prefix: match[1].replace(/0+$/, '') || fallbackPrefix, number: match[2] };
+    }
+
+    function addItemRow(data = {}) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+          <td><input type="text" class="i-name" value="${data.name||''}" placeholder="Item name" required></td>
+          <td><input type="number" class="i-qty" value="${data.qty||1}" min="0.01" step="any" oninput="updateTotals()" required></td>
+          <td><input type="text" class="i-unit" value="${data.unit||'pcs'}" placeholder="unit"></td>
+          <td><input type="number" class="i-price" value="${data.price||0}" min="0" step="any" oninput="updateTotals()" required></td>
+          <td><input type="number" class="i-gst" value="${data.gst||0}" min="0" max="100" oninput="updateTotals()"></td>
+          <td><button class="btn sm icon danger" onclick="this.closest('tr').remove();updateTotals()"><i class="ti ti-trash"></i></button></td>`;
+      document.getElementById('items-body').appendChild(tr);
+    }
+
+    function addQuickProduct() {
+      const pName = document.getElementById('quick-product').value;
+      const qty = parseFloat(document.getElementById('quick-qty').value) || 1;
+      const prod = findProduct(pName);
+      if (!prod) { alert('Product list mein nahi mila!'); return; }
+      if (currentType === 'sale' && (prod.stock || 0) < qty) {
+        alert(`Stock kam hai! Available: ${prod.stock||0}`);
+        return;
+      }
+      addItemRow({ name: prod.name, qty, unit: prod.unit, price: currentType === 'sale' ? prod.salePrice :
+          prod.purchasePrice, gst: prod.gst });
+      updateTotals();
+      document.getElementById('quick-product').value = '';
+      document.getElementById('quick-qty').value = '1';
+    }
+
+    function updateTotals() {
+      const items = [];
+      document.querySelectorAll('#items-body tr').forEach(tr => {
+        items.push({
+          qty: tr.querySelector('.i-qty').value,
+          price: tr.querySelector('.i-price').value,
+          gst: tr.querySelector('.i-gst').value
+        });
+      });
+      const t = calcTotals(items);
+      document.getElementById('t-sub').textContent = fmt(t.sub);
+      document.getElementById('t-gst').textContent = fmt(t.gst);
+      document.getElementById('t-total').textContent = fmt(t.total);
+    }
+
+    async function saveEntry() {
+      const party = document.getElementById('f-party').value.trim();
+      const prefix = document.getElementById('f-bill-prefix').value.trim();
+      const num = document.getElementById('f-billno').value.trim();
+      const date = document.getElementById('f-date').value;
+      const due = document.getElementById('f-due').value;
+      const status = document.getElementById('f-status').value;
+      const notes = document.getElementById('f-notes').value.trim();
+      const phone = document.getElementById('f-phone').value;
+
+      if (!party || !num || !date) { alert('Party name, bill number aur date daalna zaruri hai.'); return; }
+
+      const items = [];
+      document.querySelectorAll('#items-body tr').forEach(tr => {
+        const name = tr.querySelector('.i-name').value.trim();
+        const qty = parseFloat(tr.querySelector('.i-qty').value) || 0;
+        const unit = tr.querySelector('.i-unit').value.trim();
+        const price = parseFloat(tr.querySelector('.i-price').value) || 0;
+        const gst = parseFloat(tr.querySelector('.i-gst').value) || 0;
+        if (name) items.push({ name, qty, unit, price, gst });
+      });
+
+      if (!items.length) { alert('Kam se kam ek item add karein.'); return; }
+
+      const invoiceNo = prefix + num;
+      const typeKey = currentType === 'sale' ? 'sales' : 'purchases';
+      const entry = { invoiceNo, party, date, due, status, notes, phone, items };
+
+      const existing = store[typeKey].some((e, idx) => idx !== editIndex && e.invoiceNo === invoiceNo);
+      if (existing) {
+        alert(`Invoice number "${invoiceNo}" already exists! Please use a different number.`);
+        return;
+      }
+
+      if (editIndex >= 0) {
+        const oldEntry = store[typeKey][editIndex];
+        if (currentType === 'sale') adjustStockForInvoices(oldEntry.items, 'add');
+        else adjustStockForInvoices(oldEntry.items, 'sub');
+
+        store[typeKey][editIndex] = entry;
+      } else {
+        store[typeKey].push(entry);
+        if (currentType === 'sale') invoiceCounters.sale = Math.max(invoiceCounters.sale, Number(num) + 1);
+        else invoiceCounters.purchase = Math.max(invoiceCounters.purchase, Number(num) + 1);
+      }
+
+      if (currentType === 'sale') adjustStockForInvoices(items, 'sub');
+      else adjustStockForInvoices(items, 'add');
+
+      await saveData();
+
+      if (party === 'RTO Customer' && window._pendingPackingDeduct) {
+        const prod = findProduct(window._pendingPackingDeduct.name);
+        if (prod) {
+          prod.packingStock = Math.max(0, (prod.packingStock || 0) - 1);
+          await saveData();
+          showToast('info', `📦 Packing stock -1 for ${prod.name}`);
+        }
+        window._pendingPackingDeduct = null;
+      }
+
+      closeModal();
+      showPage(currentType === 'sale' ? 'sales' : 'purchase', document.querySelector(
+        `[data-page="${currentType === 'sale' ? 'sales' : 'purchase'}"]`));
+      showToast('success', 'Entry saved successfully!');
+    }
+
+    function adjustStockForInvoices(items, action) {
+      items.forEach(it => {
+        const p = findProduct(it.name);
+        if (p) {
+          if (action === 'add') p.stock = (p.stock || 0) + it.qty;
+          else p.stock = Math.max(0, (p.stock || 0) - it.qty);
+        }
+      });
+    }
+
+    // ─── CUSTOMERS / VENDORS ──────────────────────────────────────────────────
     function renderParties(type) {
       const isC = type === 'customers';
       const data = isC ? store.customers : store.vendors;
@@ -944,6 +1274,44 @@
       }).join('');
     }
 
+    function openPartyModal(type) {
+      currentPartyType = type;
+      document.getElementById('party-modal-title').textContent = type === 'customer' ? 'Add Customer' : 'Add Vendor';
+      document.getElementById('p-name').value = '';
+      document.getElementById('p-phone').value = '';
+      document.getElementById('p-gstin').value = '';
+      document.getElementById('p-address').value = '';
+      document.getElementById('party-modal').classList.add('open');
+      setTimeout(() => document.getElementById('p-name').focus(), 100);
+    }
+
+    function closePartyModal() { document.getElementById('party-modal').classList.remove('open'); }
+
+    async function saveParty() {
+      const name = document.getElementById('p-name').value.trim();
+      const phone = document.getElementById('p-phone').value.trim();
+      const gstin = document.getElementById('p-gstin').value.trim().toUpperCase();
+      const address = document.getElementById('p-address').value.trim();
+      if (!name) { alert('Naam daalna zaruri hai.'); return; }
+      const arr = currentPartyType === 'customer' ? store.customers : store.vendors;
+      arr.push({ name, phone, gstin, address });
+      await saveData();
+      closePartyModal();
+      const activeNavId = currentPartyType === 'customer' ? 'customers' : 'vendors';
+      showPage(activeNavId, document.querySelector(`[data-page="${activeNavId}"]`));
+    }
+
+    async function deleteParty(index, type) {
+      if (!confirm('Kya aap is contact ko hatana chahte hain?')) return;
+      if (await verifyActionPassword('Delete Contact')) {
+        store[type].splice(index, 1);
+        await saveData();
+        renderParties(type);
+        showToast('success', 'Contact deleted successfully.');
+      }
+    }
+
+    // ─── PRODUCTS ──────────────────────────────────────────────────────────────
     function renderProducts() {
       const tbody = document.getElementById('products-tbody');
       if (!store.products.length) { tbody.innerHTML =
@@ -992,10 +1360,63 @@
       updateTotals();
     }
 
-    function findProduct(name) {
-      return store.products.find(p => p.name.toLowerCase() === String(name).trim().toLowerCase());
+    function openProductModal(idx = -1) {
+      editProductIndex = idx;
+      if (idx >= 0) {
+        const p = store.products[idx];
+        document.getElementById('pr-name').value = p.name;
+        document.getElementById('pr-unit').value = p.unit;
+        document.getElementById('pr-sale').value = p.salePrice;
+        document.getElementById('pr-purchase').value = p.purchasePrice;
+        document.getElementById('pr-gst').value = p.gst;
+        document.getElementById('pr-stock').value = p.stock;
+        document.getElementById('product-modal-title').textContent = 'Edit Product';
+      } else {
+        document.getElementById('pr-name').value = '';
+        document.getElementById('pr-unit').value = 'pcs';
+        document.getElementById('pr-sale').value = '';
+        document.getElementById('pr-purchase').value = '';
+        document.getElementById('pr-gst').value = '18';
+        document.getElementById('pr-stock').value = '';
+        document.getElementById('product-modal-title').textContent = 'Add Product';
+      }
+      document.getElementById('product-modal').classList.add('open');
+      setTimeout(() => document.getElementById('pr-name').focus(), 100);
     }
 
+    function closeProductModal() { document.getElementById('product-modal').classList.remove('open'); }
+
+    async function saveProduct() {
+      const name = document.getElementById('pr-name').value.trim();
+      const unit = document.getElementById('pr-unit').value.trim();
+      const salePrice = parseFloat(document.getElementById('pr-sale').value) || 0;
+      const purchasePrice = parseFloat(document.getElementById('pr-purchase').value) || 0;
+      const gst = parseFloat(document.getElementById('pr-gst').value) || 0;
+      const stock = parseFloat(document.getElementById('pr-stock').value) || 0;
+      if (!name) { alert('Product name zaruri hai.'); return; }
+      const p = { name, unit, salePrice, purchasePrice, gst, stock, packingStock: 0 };
+      if (editProductIndex >= 0) {
+        p.packingStock = store.products[editProductIndex].packingStock || 0;
+        store.products[editProductIndex] = p;
+      } else {
+        store.products.push(p);
+      }
+      await saveData();
+      closeProductModal();
+      showPage('products', document.querySelector('[data-page="products"]'));
+    }
+
+    async function deleteProduct(index) {
+      if (!confirm('Kya aap is product ko remove karna chahte hain?')) return;
+      if (await verifyActionPassword('Delete Product')) {
+        store.products.splice(index, 1);
+        await saveData();
+        renderProducts();
+        showToast('success', 'Product deleted successfully.');
+      }
+    }
+
+    // ─── CUSTOMER LEDGER ──────────────────────────────────────────────────────
     function setupLedgerYears() {
       const years = [...new Set(store.sales.map(s => new Date(s.date + 'T00:00:00').getFullYear()))].sort((a, b) => b - a);
       const currentYear = new Date().getFullYear();
@@ -1016,7 +1437,9 @@
       document.getElementById('customer-ledger-modal').classList.add('open');
     }
 
-    function closeCustomerLedger() { document.getElementById('customer-ledger-modal').classList.remove('open'); }
+    function closeCustomerLedger() {
+      document.getElementById('customer-ledger-modal').classList.remove('open');
+    }
 
     function clearLedgerFilter() { document.getElementById('ledger-month').value = '';
       document.getElementById('ledger-year').value = '';
@@ -1055,6 +1478,7 @@
       }).join('');
     }
 
+    // ─── INVOICE VIEW / PRINT ──────────────────────────────────────────────────
     function invoiceHTML(type, index) {
       const data = type === 'sales' ? store.sales : store.purchases;
       const r = data[index];
@@ -1063,6 +1487,7 @@
       const totals = calcTotals(r.items);
       const title = type === 'sales' ? 'SALE INVOICE' : 'PURCHASE BILL';
       const billLabel = type === 'sales' ? 'Invoice No' : 'Bill No';
+      const biz = store.business || defaultStore.business;
 
       const rows = r.items.map((item, i) => {
         const c = calcItem(item);
@@ -1079,12 +1504,12 @@
       return `
         <div class="inv-header">
           <div>
-            <div class="inv-brand-name">ADIXION</div>
+            <div class="inv-brand-name">${esc(biz.name)}</div>
             <div class="inv-brand-sub">Premium Business Solutions</div>
             <div class="inv-brand-details">
-              📍 Your Address, City, State — 000000<br>
-              📞 +91 00000 00000 &nbsp;|&nbsp; ✉ info@adixion.com<br>
-              🏷 GSTIN: 00AAAAA0000A1Z0
+              📍 ${esc(biz.address)}<br>
+              📞 ${esc(biz.phone)} &nbsp;|&nbsp; ✉ ${esc(biz.email)}<br>
+              🏷 GSTIN: ${esc(biz.gstin)}
             </div>
           </div>
           <div class="inv-title-block">
@@ -1148,7 +1573,7 @@
           <div class="inv-sign-box">
             <div class="inv-section-label">Authorised Signatory</div>
             <div class="inv-sign-line"></div>
-            <div class="inv-sign-label">For ADIXION</div>
+            <div class="inv-sign-label">For ${esc(biz.name)}</div>
           </div>
         </div>
 
@@ -1174,197 +1599,15 @@
     function printInvoice() { if (!activeInvoice) return;
       window.print(); }
 
-    function openModal(type, idx = -1) {
-      currentType = type;
-      editIndex = idx;
-      const isSale = type === 'sale';
-      document.getElementById('modal-title').textContent = idx >= 0 ? (isSale ? 'Edit Invoice' : 'Edit Purchase Bill') :
-        (isSale ? 'Create Invoice' : 'Create Purchase Bill');
-      document.getElementById('party-label').textContent = isSale ? 'Customer Name' : 'Vendor Name';
-      const parties = isSale ? store.customers : store.vendors;
-      document.getElementById('party-list').innerHTML = parties.map(p => `<option value="${p.name}">`).join('');
-      updateProductList();
-      const today = new Date().toISOString().split('T')[0];
-      if (idx >= 0) {
-        const r = isSale ? store.sales[idx] : store.purchases[idx];
-        const parts = splitBillNo(r.invoiceNo, isSale ? 'INV-' : 'PUR-');
-        document.getElementById('f-party').value = r.party;
-        document.getElementById('f-bill-prefix').value = parts.prefix;
-        document.getElementById('f-billno').value = parts.number;
-        document.getElementById('f-date').value = r.date;
-        document.getElementById('f-due').value = r.due;
-        document.getElementById('f-phone').value = r.phone;
-        document.getElementById('f-status').value = r.status;
-        document.getElementById('f-notes').value = r.notes;
-        document.getElementById('items-body').innerHTML = '';
-        r.items.forEach(it => addItemRow(it));
+    // ─── EMPLOYEE NAV UI ──────────────────────────────────────────────────────
+    function updateEmployeesNavUI() {
+      const badgeEl = document.getElementById('emp-premium-badge');
+      if (store._employeePaid) {
+        if (badgeEl) { badgeEl.className = "badge paid";
+          badgeEl.textContent = "ACTIVE"; }
       } else {
-        document.getElementById('f-party').value = '';
-        document.getElementById('f-bill-prefix').value = isSale ? 'INV-' : 'PUR-';
-        document.getElementById('f-billno').value = String(isSale ? invoiceCounters.sale : invoiceCounters.purchase);
-        document.getElementById('f-date').value = today;
-        document.getElementById('f-due').value = '';
-        document.getElementById('f-phone').value = '';
-        document.getElementById('f-status').value = 'pending';
-        document.getElementById('f-notes').value = '';
-        document.getElementById('items-body').innerHTML = '';
-      }
-      updateTotals();
-      document.getElementById('invoice-modal').classList.add('open');
-    }
-
-    function closeModal() { document.getElementById('invoice-modal').classList.remove('open'); }
-
-    function splitBillNo(value, fallbackPrefix) {
-      const match = String(value || '').match(/^([A-Za-z]+-?0*)(.*)$/);
-      if (!match) return { prefix: fallbackPrefix, number: value || '' };
-      return { prefix: match[1].replace(/0+$/, '') || fallbackPrefix, number: match[2] };
-    }
-
-    function addItemRow(data = {}) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-          <td><input type="text" class="i-name" value="${data.name||''}" placeholder="Item name" required></td>
-          <td><input type="number" class="i-qty" value="${data.qty||1}" min="0.01" step="any" oninput="updateTotals()" required></td>
-          <td><input type="text" class="i-unit" value="${data.unit||'pcs'}" placeholder="unit"></td>
-          <td><input type="number" class="i-price" value="${data.price||0}" min="0" step="any" oninput="updateTotals()" required></td>
-          <td><input type="number" class="i-gst" value="${data.gst||0}" min="0" max="100" oninput="updateTotals()"></td>
-          <td><button class="btn sm icon danger" onclick="this.closest('tr').remove();updateTotals()"><i class="ti ti-trash"></i></button></td>`;
-      document.getElementById('items-body').appendChild(tr);
-    }
-
-    function addQuickProduct() {
-      const pName = document.getElementById('quick-product').value;
-      const qty = parseFloat(document.getElementById('quick-qty').value) || 1;
-      const prod = findProduct(pName);
-      if (!prod) { alert('Product list mein nahi mila!'); return; }
-      if (currentType === 'sale' && (prod.stock || 0) < qty) {
-        alert(`Stock kam hai! Available: ${prod.stock||0}`);
-        return;
-      }
-      addItemRow({ name: prod.name, qty, unit: prod.unit, price: currentType === 'sale' ? prod.salePrice :
-          prod.purchasePrice, gst: prod.gst });
-      updateTotals();
-      document.getElementById('quick-product').value = '';
-      document.getElementById('quick-qty').value = '1';
-    }
-
-    function updateTotals() {
-      const items = [];
-      document.querySelectorAll('#items-body tr').forEach(tr => {
-        items.push({
-          qty: tr.querySelector('.i-qty').value,
-          price: tr.querySelector('.i-price').value,
-          gst: tr.querySelector('.i-gst').value
-        });
-      });
-      const t = calcTotals(items);
-      document.getElementById('t-sub').textContent = fmt(t.sub);
-      document.getElementById('t-gst').textContent = fmt(t.gst);
-      document.getElementById('t-total').textContent = fmt(t.total);
-    }
-
-    async function deleteEntry(index, type) {
-      if (!confirm('Kya aap sachme is entry ko delete karna chahte hain?')) return;
-      if (await verifyActionPassword('Delete Entry')) {
-        const typeKey = type === 'sales' ? 'sales' : 'purchases';
-        const entry = store[typeKey][index];
-        if (type === 'sales') adjustStockForInvoices(entry.items, 'add');
-        else adjustStockForInvoices(entry.items, 'sub');
-
-        store[typeKey].splice(index, 1);
-        await saveData();
-        renderTable(type);
-        showToast('success', 'Entry permanently deleted');
-      }
-    }
-
-    function openPartyModal(type) {
-      currentPartyType = type;
-      document.getElementById('party-modal-title').textContent = type === 'customer' ? 'Add Customer' : 'Add Vendor';
-      document.getElementById('p-name').value = '';
-      document.getElementById('p-phone').value = '';
-      document.getElementById('p-gstin').value = '';
-      document.getElementById('p-address').value = '';
-      document.getElementById('party-modal').classList.add('open');
-    }
-
-    function closePartyModal() { document.getElementById('party-modal').classList.remove('open'); }
-
-    async function saveParty() {
-      const name = document.getElementById('p-name').value.trim();
-      const phone = document.getElementById('p-phone').value.trim();
-      const gstin = document.getElementById('p-gstin').value.trim().toUpperCase();
-      const address = document.getElementById('p-address').value.trim();
-      if (!name) { alert('Naam daalna zaruri hai.'); return; }
-      const arr = currentPartyType === 'customer' ? store.customers : store.vendors;
-      arr.push({ name, phone, gstin, address });
-      await saveData();
-      closePartyModal();
-      const activeNavId = currentPartyType === 'customer' ? 'customers' : 'vendors';
-      showPage(activeNavId, document.querySelector(`[data-page="${activeNavId}"]`));
-    }
-
-    async function deleteParty(index, type) {
-      if (!confirm('Kya aap is contact ko hatana chahte hain?')) return;
-      if (await verifyActionPassword('Delete Contact')) {
-        store[type].splice(index, 1);
-        await saveData();
-        renderParties(type);
-      }
-    }
-
-    function openProductModal(idx = -1) {
-      editProductIndex = idx;
-      if (idx >= 0) {
-        const p = store.products[idx];
-        document.getElementById('pr-name').value = p.name;
-        document.getElementById('pr-unit').value = p.unit;
-        document.getElementById('pr-sale').value = p.salePrice;
-        document.getElementById('pr-purchase').value = p.purchasePrice;
-        document.getElementById('pr-gst').value = p.gst;
-        document.getElementById('pr-stock').value = p.stock;
-        document.getElementById('product-modal-title').textContent = 'Edit Product';
-      } else {
-        document.getElementById('pr-name').value = '';
-        document.getElementById('pr-unit').value = 'pcs';
-        document.getElementById('pr-sale').value = '';
-        document.getElementById('pr-purchase').value = '';
-        document.getElementById('pr-gst').value = '18';
-        document.getElementById('pr-stock').value = '';
-        document.getElementById('product-modal-title').textContent = 'Add Product';
-      }
-      document.getElementById('product-modal').classList.add('open');
-    }
-
-    function closeProductModal() { document.getElementById('product-modal').classList.remove('open'); }
-
-    async function saveProduct() {
-      const name = document.getElementById('pr-name').value.trim();
-      const unit = document.getElementById('pr-unit').value.trim();
-      const salePrice = parseFloat(document.getElementById('pr-sale').value) || 0;
-      const purchasePrice = parseFloat(document.getElementById('pr-purchase').value) || 0;
-      const gst = parseFloat(document.getElementById('pr-gst').value) || 0;
-      const stock = parseFloat(document.getElementById('pr-stock').value) || 0;
-      if (!name) { alert('Product name zaruri hai.'); return; }
-      const p = { name, unit, salePrice, purchasePrice, gst, stock, packingStock: 0 };
-      if (editProductIndex >= 0) {
-        p.packingStock = store.products[editProductIndex].packingStock || 0;
-        store.products[editProductIndex] = p;
-      } else {
-        store.products.push(p);
-      }
-      await saveData();
-      closeProductModal();
-      showPage('products', document.querySelector('[data-page="products"]'));
-    }
-
-    async function deleteProduct(index) {
-      if (!confirm('Kya aap is product ko remove karna chahte hain?')) return;
-      if (await verifyActionPassword('Delete Product')) {
-        store.products.splice(index, 1);
-        await saveData();
-        renderProducts();
+        if (badgeEl) { badgeEl.className = "badge pending";
+          badgeEl.textContent = "PREMIUM"; }
       }
     }
 
@@ -1407,42 +1650,6 @@
       }, 1500);
     }
 
-    function updateEmployeesNavUI() {
-      const badgeEl = document.getElementById('emp-premium-badge');
-      if (store._employeePaid) {
-        if (badgeEl) { badgeEl.className = "badge paid";
-          badgeEl.textContent = "ACTIVE"; }
-      } else {
-        if (badgeEl) { badgeEl.className = "badge pending";
-          badgeEl.textContent = "PREMIUM"; }
-      }
-    }
-
-    function openEmpSetupModal() {
-      document.getElementById('emp-setup-username').value = '';
-      document.getElementById('emp-setup-pass').value = '';
-      document.getElementById('emp-setup-confirm').value = '';
-      document.getElementById('emp-setup-modal').classList.add('open');
-    }
-
-    function closeEmpSetupModal() { document.getElementById('emp-setup-modal').classList.remove('open'); }
-
-    async function saveEmployeePassword() {
-      const username = document.getElementById('emp-setup-username').value.trim();
-      const p1 = document.getElementById('emp-setup-pass').value;
-      const p2 = document.getElementById('emp-setup-confirm').value;
-      if (!username || !p1) { alert('Saari fields bharein.'); return; }
-      if (p1 !== p2) { alert('Passwords match nahi ho rahe.'); return; }
-      if (!store.employees) store.employees = [];
-      const exists = store.employees.some(e => e.username.toLowerCase() === username.toLowerCase());
-      if (exists) { alert('Ye User ID pehle se bani hui hai!'); return; }
-      store.employees.push({ username, password: p1, status: 'active' });
-      await saveData();
-      closeEmpSetupModal();
-      renderEmployees();
-      showToast('success', 'Employee credentials created!');
-    }
-
     function renderEmployees() {
       const tbody = document.getElementById('employees-table').querySelector('tbody');
       if (!store.employees || !store.employees.length) { tbody.innerHTML =
@@ -1454,13 +1661,65 @@
         </tr>`).join('');
     }
 
-    async function deleteEmployeeRecord(idx) {
-      if (!confirm('Kya aap is employee account ko delete karna chahte hain?')) return;
-      store.employees.splice(idx, 1);
-      await saveData();
-      renderEmployees();
+    function openEmpSetupModal() {
+      document.getElementById('emp-setup-username').value = '';
+      document.getElementById('emp-setup-pass').value = '';
+      document.getElementById('emp-setup-confirm').value = '';
+      document.getElementById('emp-setup-modal').classList.add('open');
+      setTimeout(() => document.getElementById('emp-setup-username').focus(), 100);
     }
 
+    function closeEmpSetupModal() { document.getElementById('emp-setup-modal').classList.remove('open'); }
+
+    // ─── DELETE ENTRY ─────────────────────────────────────────────────────────
+    async function deleteEntry(index, type) {
+      if (!confirm('Kya aap sachme is entry ko delete karna chahte hain?')) return;
+      if (await verifyActionPassword('Delete Entry')) {
+        const typeKey = type === 'sales' ? 'sales' : 'purchases';
+        const entry = store[typeKey][index];
+        if (type === 'sales') adjustStockForInvoices(entry.items, 'add');
+        else adjustStockForInvoices(entry.items, 'sub');
+
+        store[typeKey].splice(index, 1);
+        await saveData();
+        renderTable(type);
+        showToast('success', 'Entry permanently deleted');
+      }
+    }
+
+    // ─── TOAST ────────────────────────────────────────────────────────────────
+    function showToast(type, text) {
+      const container = document.getElementById('toast-container');
+      const t = document.createElement('div');
+      t.className = `toast ${type}`;
+      const icons = { success: 'ti-circle-check', warning: 'ti-alert-circle', error: 'ti-circle-x', info: 'ti-info-circle' };
+      t.innerHTML = `<i class="ti ${icons[type]||'ti-info-circle'}"></i><span>${esc(text)}</span>`;
+      container.appendChild(t);
+      setTimeout(() => { t.classList.add('toast-out');
+        t.addEventListener('animationend', () => t.remove()); }, 3000);
+    }
+
+    // ─── CLOCK ────────────────────────────────────────────────────────────────
+    function updateClock() {
+      const now = new Date();
+      document.getElementById('liveTime').textContent = now.toLocaleTimeString('en-IN', { hour: '2-digit',
+        minute: '2-digit', second: '2-digit', hour12: true });
+      document.getElementById('liveDate').textContent = now.toLocaleDateString('en-IN', { weekday: 'long',
+        day: 'numeric', month: 'short', year: 'numeric' });
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // ─── FILTER TABLE ─────────────────────────────────────────────────────────
+    function filterTable(tableId, queryText) {
+      const q = queryText.toLowerCase().trim();
+      document.querySelectorAll(`#${tableId} tbody tr`).forEach(tr => {
+        if (tr.classList.contains('empty')) return;
+        tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+
+    // ─── AUTH TAB SWITCHING ──────────────────────────────────────────────────
     function switchAuthTab(type) {
       const isAdmin = type === 'admin';
       document.getElementById('tab-admin-login').style.borderBottom = isAdmin ? '2px solid var(--blue)' : 'none';
@@ -1481,110 +1740,7 @@
         'triggerEmployeeLoginSearch()');
     }
 
-    async function triggerEmployeeLoginSearch() {
-      const username = document.getElementById('auth-emp-username').value.trim();
-      const pass = document.getElementById('auth-pass').value;
-      if (!username || !pass) { alert('User ID aur Password dono dalein'); return; }
-
-      showToast('warning', 'Connecting to database...');
-      try {
-        const { collection, getDocs, query, where } = window._fbFns;
-        const q = query(collection(window._fbDb, 'users'), where('employees', '!=', []));
-        const snapshots = await getDocs(q);
-        let foundUser = null;
-        let foundAdminUid = null;
-
-        snapshots.forEach(docSnap => {
-          const data = docSnap.data();
-          if (data.employees) {
-            const match = data.employees.find(e => e.username.toLowerCase() === username
-              .toLowerCase() && e.password === pass);
-            if (match) {
-              foundUser = match;
-              foundAdminUid = docSnap.id;
-            }
-          }
-        });
-
-        if (foundUser) {
-          localStorage.setItem('emp_session_admin_uid', foundAdminUid);
-          localStorage.setItem('emp_session_username', foundUser.username);
-          await loadEmployeeSession();
-        } else {
-          alert('Galat Employee ID ya Password!');
-        }
-      } catch (e) {
-        alert('Login failed: ' + e.message);
-      }
-    }
-
-    async function loadEmployeeSession() {
-      currentUser = localStorage.getItem('emp_session_admin_uid');
-      const empUser = localStorage.getItem('emp_session_username');
-      isEmployeeMode = true;
-
-      await window._fbLoadStore();
-      invoiceCounters = loadInvoiceCounters();
-
-      document.body.classList.remove('auth-locked');
-      document.body.classList.add('employee-mode');
-
-      document.getElementById('current-user-label').textContent = `${empUser} (Staff)`;
-      document.getElementById('logout-btn-header').style.display = 'none';
-
-      document.querySelectorAll('.nav-item').forEach(btn => {
-        const page = btn.getAttribute('data-page');
-        if (!employeeAllowedPages.includes(page)) {
-          btn.classList.add('emp-disabled');
-          btn.style.opacity = '0.4';
-        }
-      });
-
-      document.getElementById('sidebar-emp-section').style.display = 'block';
-      document.getElementById('emp-mode-indicator').style.display = 'inline-flex';
-      document.getElementById('exit-emp-btn-header').style.display = 'inline-flex';
-
-      updateProductList();
-      showPage('sales', document.querySelector('[data-page="sales"]'));
-    }
-
-    function logoutEmployee() {
-      localStorage.removeItem('emp_session_admin_uid');
-      localStorage.removeItem('emp_session_username');
-      isEmployeeMode = false;
-      window.location.reload();
-    }
-
-    function filterTable(tableId, queryText) {
-      const q = queryText.toLowerCase().trim();
-      document.querySelectorAll(`#${tableId} tbody tr`).forEach(tr => {
-        if (tr.classList.contains('empty')) return;
-        tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
-      });
-    }
-
-    function showToast(type, text) {
-      const container = document.getElementById('toast-container');
-      const t = document.createElement('div');
-      t.className = `toast ${type}`;
-      const icons = { success: 'ti-circle-check', warning: 'ti-alert-circle', error: 'ti-circle-x' };
-      t.innerHTML = `<i class="ti ${icons[type]||'ti-info-circle'}"></i><span>${esc(text)}</span>`;
-      container.appendChild(t);
-      setTimeout(() => { t.classList.add('toast-out');
-        t.addEventListener('animationend', () => t.remove()); }, 3000);
-    }
-
-    function updateClock() {
-      const now = new Date();
-      document.getElementById('liveTime').textContent = now.toLocaleTimeString('en-IN', { hour: '2-digit',
-        minute: '2-digit', second: '2-digit', hour12: true });
-      document.getElementById('liveDate').textContent = now.toLocaleDateString('en-IN', { weekday: 'long',
-        day: 'numeric', month: 'short', year: 'numeric' });
-    }
-    setInterval(updateClock, 1000);
-    updateClock();
-
-    // ─── MISSING FUNCTIONS (placeholders) ───
+    // ─── PLACEHOLDER FUNCTIONS ──────────────────────────────────────────────
     function employeeLogin() {
       alert('Employee login ke liye "Employee Login" tab use karein.');
     }
@@ -1597,7 +1753,7 @@
       document.getElementById('emp-login-modal').classList.remove('open');
     }
 
-    // ─── EXPOSE ALL FUNCTIONS TO GLOBAL SCOPE ───
+    // ─── EXPOSE ALL FUNCTIONS TO GLOBAL SCOPE ──────────────────────────────
     window.login = login;
     window.setAuthMode = setAuthMode;
     window.createAccount = createAccount;
@@ -1652,8 +1808,61 @@
     window.removeBulkRow = removeBulkRow;
     window.clearBulkRows = clearBulkRows;
     window.saveBulkReturns = saveBulkReturns;
-	window.createSaleFromReturn = createSaleFromReturn; 
- </script>
+    window.createSaleFromReturn = createSaleFromReturn;
+
+    // ─── FIX: EXPOSE DELETE FUNCTIONS ──────────────────────────────────────
+    window.deleteParty = deleteParty;
+    window.deleteProduct = deleteProduct;
+    window.saveReturn = saveReturn;
+    window.closeCustomerLedger = closeCustomerLedger;
+    window.deleteEmployeeRecord = deleteEmployeeRecord;
+    window.quickAddChip = quickAddChip;
+
+    // ─── FIX: CLOSE ALL MODALS ON ESCAPE KEY ──────────────────────────────
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        const openModals = document.querySelectorAll('.modal-bg.open');
+        if (openModals.length === 0) return;
+
+        const closeMap = {
+          'invoice-modal': closeModal,
+          'party-modal': closePartyModal,
+          'product-modal': closeProductModal,
+          'return-modal': closeReturnModal,
+          'bulk-return-modal': closeBulkReturnModal,
+          'order-match-modal': closeOrderMatchModal,
+          'premium-modal': closePremiumModal,
+          'payment-modal': closePaymentModal,
+          'emp-setup-modal': closeEmpSetupModal,
+          'customer-ledger-modal': closeCustomerLedger,
+          'invoice-view-modal': closeInvoiceView
+        };
+
+        openModals.forEach(modal => {
+          const id = modal.id;
+          if (closeMap[id]) {
+            closeMap[id]();
+          } else {
+            modal.classList.remove('open');
+          }
+        });
+
+        editIndex = -1;
+        editProductIndex = -1;
+        editReturnIndex = -1;
+        editPartyIndex = -1;
+      }
+    });
+
+    // ─── BACKGROUND CLICK FOR CUSTOMER LEDGER ──────────────────────────────
+    document.getElementById('customer-ledger-modal').addEventListener('click', function(e) {
+      if (e.target === this) {
+        closeCustomerLedger();
+      }
+    });
+
+
+  </script>
 
   <style>
     /* ── All styles remain exactly as before ── */
@@ -2242,7 +2451,6 @@
       padding: 0;
     }
 
-    /* --- Return filter bar --- */
     .return-filter-bar {
       background: rgba(255, 255, 255, .82);
       border: 1px solid var(--line-soft);
@@ -2321,7 +2529,6 @@
       margin-right: 2px;
     }
 
-    /* platform badge colors */
     .badge.meesho {
       background: #fce8f5;
       color: #9e116e;
@@ -2472,7 +2679,6 @@
       font-weight: 720;
     }
 
-    /* Bulk return table inside modal */
     .bulk-return-table {
       min-width: 700px;
       width: 100%;
@@ -3016,7 +3222,6 @@
       margin-top: 10px;
     }
 
-    /* ===== EMPLOYEE MODE STYLES ===== */
     .employee-nav-section {
       padding: 12px 12px 0;
     }
@@ -3059,7 +3264,6 @@
       letter-spacing: .3px;
     }
 
-    /* Premium Modal */
     .premium-modal-shell {
       width: min(520px, 96vw);
     }
@@ -3158,7 +3362,6 @@
       box-shadow: 0 12px 32px rgba(255, 107, 0, .35);
     }
 
-    /* Employee Login Modal */
     .emp-login-modal-shell {
       width: min(440px, 96vw);
     }
@@ -3187,7 +3390,6 @@
       margin-top: 4px;
     }
 
-    /* Employee Mode Badge */
     .emp-mode-badge {
       display: inline-flex;
       align-items: center;
@@ -3225,7 +3427,6 @@
       color: #30435d;
     }
 
-    /* Toast Notification */
     .toast-container {
       position: fixed;
       bottom: 24px;
@@ -3292,7 +3493,6 @@
       }
     }
 
-    /* Exit Employee Btn */
     .exit-emp-btn {
       display: none;
       margin: 8px 12px;
@@ -3533,13 +3733,11 @@
         padding: 2px 8px;
         min-height: 22px;
       }
-      /* Bulk modal table scroll */
       .bulk-return-table {
         min-width: 600px;
       }
     }
 
-    /* ─── ORDER MATCH STYLES ─── */
     .order-match-result {
       margin-top: 16px;
       max-height: 400px;
@@ -3592,7 +3790,7 @@
 
 <body class="auth-locked">
 
-  <!-- ─── AUTH SCREEN ─── -->
+  <!-- ─── AUTH SCREEN ────────────────────────────────────────────────────────── -->
   <section class="auth-screen">
     <div class="auth-card">
       <div class="logo"><span class="logo-mark"><i class="ti ti-receipt-2"></i></span>Bill<span>Pro</span></div>
@@ -3652,7 +3850,7 @@
     </div>
   </section>
 
-  <!-- ─── MAIN APP ─── -->
+  <!-- ─── MAIN APP ───────────────────────────────────────────────────────────── -->
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
@@ -3933,15 +4131,15 @@
     </main>
   </div>
 
-  <!-- ─── ALL MODALS ─── -->
+  <!-- ─── ALL MODALS ──────────────────────────────────────────────────────────── -->
   <!-- Return Modal -->
   <div class="modal-bg" id="return-modal">
     <div class="modal" style="width:500px">
       <div class="modal-head"><h2 id="return-modal-title">Log E-Commerce Return</h2><button class="btn sm icon" onclick="closeReturnModal()"><i class="ti ti-x"></i></button></div>
       <div class="modal-body">
         <div class="form-group" style="margin-bottom:12px"><label>Platform</label><select id="ret-platform"><option value="meesho">Meesho</option><option value="amazon">Amazon</option><option value="flipkart">Flipkart</option><option value="myntra">Myntra</option><option value="flex">Flex</option></select></div>
-        <div class="form-group" style="margin-bottom:12px"><label>Order ID / AWB Number</label><input type="text" id="ret-orderid" placeholder="Enter tracking or order ID"></div>
-        <div class="form-group" style="margin-bottom:12px"><label>Product Name</label><input type="text" id="ret-pname" placeholder="Which item was returned?"></div>
+        <div class="form-group" style="margin-bottom:12px"><label>Order ID / AWB Number</label><input type="text" id="ret-orderid" placeholder="Enter tracking or order ID" required></div>
+        <div class="form-group" style="margin-bottom:12px"><label>Product Name</label><input type="text" id="ret-pname" list="product-list" placeholder="Type or select from product list" required></div>
         <div class="form-row"><div class="form-group"><label>Return Log Date</label><input type="date" id="ret-date"></div><div class="form-group"><label>Return Type</label><select id="ret-type"><option value="Customer Return">Customer Return</option><option value="RTO (Courier Return)">RTO (Courier Return)</option></select></div></div>
         <div class="form-row"><div class="form-group"><label>Status</label><select id="ret-status"><option value="pending">Pending / In-Transit</option><option value="received">Received (Good Condition)</option><option value="damaged">Damaged (Need Claim)</option><option value="claim_filed">Claim Filed</option><option value="claim_approved">Claim Approved / Paid</option></select></div><div class="form-group"><label>Claim / Refund Amount (₹)</label><input type="number" id="ret-amount" value="0" min="0"></div></div>
       </div>
@@ -4113,7 +4311,7 @@
     </div>
   </div>
 
-  <!-- Employee Login Modal -->
+  <!-- Employee Login Modal (redundant but kept) -->
   <div class="modal-bg" id="emp-login-modal">
     <div class="modal emp-login-modal-shell">
       <div class="emp-login-hero"><i class="ti ti-user-shield"></i><h2>Employee Login</h2><p>Employee User ID aur Password daalein</p></div>
@@ -4141,7 +4339,7 @@
     </div>
   </div>
 
-  <!-- ─── ORDER MATCH MODAL ─── -->
+  <!-- Order Match Modal -->
   <div class="modal-bg" id="order-match-modal">
     <div class="modal" style="width:820px; max-width:96vw;">
       <div class="modal-head"><h2><i class="ti ti-file-spreadsheet"></i> Match New Orders (RTO Packing Stock)</h2><button class="btn sm icon" onclick="closeOrderMatchModal()"><i class="ti ti-x"></i></button></div>
