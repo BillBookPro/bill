@@ -458,6 +458,7 @@
 
       if (user) {
         currentUser = user.uid;
+        window._fbCurrentUser = user.uid;  // expose for spreadsheet script
         window._fbCurrentEmail = user.email;
         await window._fbLoadStore();
         if (!store.adminEmail || store.adminEmail !== user.email) {
@@ -474,6 +475,7 @@
         setTimeout(applyReturnFilters, 200);
       } else {
         currentUser = null;
+        window._fbCurrentUser = null;
         window._fbCurrentEmail = null;
         store = structuredClone(defaultStore);
         invoiceCounters = { sale: 1, purchase: 1 };
@@ -2561,18 +2563,20 @@
       // LocalStorage mein bhi save karo (instant backup)
       try { localStorage.setItem('billpro_ss', JSON.stringify({ books: ssBooks, order: ssSheetOrder, active: ssActiveSheet })); } catch(e) {}
 
-      // Firebase mein save karo (debounced - 1.5 sec baad taaki bar bar na save ho)
+      // Firebase mein save karo (debounced - 1.5 sec baad)
       if (ssSaveTimer) clearTimeout(ssSaveTimer);
       ssSaveTimer = setTimeout(async () => {
-        if (!window._fbDb || !window._fbFns || !currentUser) return;
+        const uid = window._fbCurrentUser;
+        if (!window._fbDb || !window._fbFns || !uid) return;
         try {
           const { doc, setDoc } = window._fbFns;
           const ssData = { books: ssBooks, order: ssSheetOrder, active: ssActiveSheet };
           await setDoc(
-            doc(window._fbDb, 'users', currentUser),
+            doc(window._fbDb, 'users', uid),
             { spreadsheetData: ssData },
             { merge: true }
           );
+          console.log('Spreadsheet Firebase mein save hua');
         } catch(e) {
           console.warn('Spreadsheet Firebase save error:', e);
         }
@@ -2580,11 +2584,12 @@
     }
 
     async function ssLoad() {
+      const uid = window._fbCurrentUser;
       // Pehle Firebase se load karo
-      if (window._fbDb && window._fbFns && currentUser) {
+      if (window._fbDb && window._fbFns && uid) {
         try {
           const { doc, getDoc } = window._fbFns;
-          const ref = doc(window._fbDb, 'users', currentUser);
+          const ref = doc(window._fbDb, 'users', uid);
           const snap = await getDoc(ref);
           if (snap.exists()) {
             const d = snap.data().spreadsheetData;
@@ -2592,16 +2597,16 @@
               ssBooks = d.books || {};
               ssSheetOrder = d.order || [];
               ssActiveSheet = d.active || '';
-              // LocalStorage bhi update karo
               try { localStorage.setItem('billpro_ss', JSON.stringify({ books: ssBooks, order: ssSheetOrder, active: ssActiveSheet })); } catch(e) {}
-              return; // Firebase se mil gaya, localStorage ki zaroorat nahi
+              console.log('Spreadsheet Firebase se load hua');
+              return;
             }
           }
         } catch(e) {
           console.warn('Spreadsheet Firebase load error:', e);
         }
       }
-      // Firebase nahi mila to localStorage se load karo (fallback)
+      // Fallback: localStorage
       try {
         const raw = localStorage.getItem('billpro_ss');
         if (raw) { const d = JSON.parse(raw); ssBooks = d.books||{}; ssSheetOrder = d.order||[]; ssActiveSheet = d.active||''; }
