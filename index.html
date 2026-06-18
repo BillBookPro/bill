@@ -190,6 +190,60 @@
       }
     }
 
+    // ─── SCAN LISTENER ───────────────────────────────────────────────────────
+    let scanListenerUnsub = null;
+
+    function startScanListener() {
+      if (scanListenerUnsub) { scanListenerUnsub(); scanListenerUnsub = null; }
+      if (!currentUser || !window._fbDb || !window._fbFns) return;
+
+      const { collection, onSnapshot, query, where, deleteDoc, doc } = window._fbFns;
+      const db = window._fbDb;
+      const q = query(collection(db, 'scan_sessions'));
+
+      scanListenerUnsub = onSnapshot(q, (snap) => {
+        snap.docChanges().forEach(async (change) => {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            if (!data.value) return;
+
+            const value = String(data.value);
+            const sheetName = data.sheet || (window.ssSheetOrder && window.ssSheetOrder[0]) || 'Sheet1';
+            const col = parseInt(data.col) || 0;
+
+            // ssBooks mein write karo
+            if (window.ssBooks) {
+              if (!window.ssBooks[sheetName]) {
+                window.ssBooks[sheetName] = { cells: {}, formats: {} };
+                if (window.ssSheetOrder && !window.ssSheetOrder.includes(sheetName)) {
+                  window.ssSheetOrder.push(sheetName);
+                }
+              }
+              const book = window.ssBooks[sheetName];
+              // Us column ki next empty row dhundo
+              const usedRows = Object.keys(book.cells)
+                .filter(k => parseInt(k.split(',')[1]) === col)
+                .map(k => parseInt(k.split(',')[0]));
+              const nextRow = usedRows.length > 0 ? Math.max(...usedRows) + 1 : 0;
+              book.cells[nextRow + ',' + col] = value;
+
+              // Spreadsheet refresh karo
+              const evt = new CustomEvent('ss-refresh');
+              document.dispatchEvent(evt);
+
+              // Firebase mein save karo
+              if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
+
+              showToast('success', '📱 Scan aaya: ' + value);
+            }
+
+            // Firestore se doc delete karo (cleanup)
+            try { await deleteDoc(doc(db, 'scan_sessions', change.doc.id)); } catch(e) {}
+          }
+        });
+      });
+    }
+
     async function saveData() {
       window.store = store; // expose for spreadsheet access
       if (!currentUser || !window._fbDb) {
@@ -476,6 +530,8 @@
               { spreadsheetData: window._ssGetSaveData() }, { merge: true });
           } catch(e) { console.warn('SS Firebase save error:', e); }
         };
+        // Scanner listener - Firebase se scan data receive karo
+        startScanListener();
         await window._fbLoadStore();
         if (!store.adminEmail || store.adminEmail !== user.email) {
           store.adminEmail = user.email;
