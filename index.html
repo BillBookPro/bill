@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BillPro</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js">
   </script>
 
@@ -579,10 +580,11 @@
       const data = store[type === 'sales' ? 'sales' : 'purchases'];
       const tbody = document.getElementById(type === 'sales' ? 'sales-tbody' : 'purchase-tbody');
       if (!data.length) { tbody.innerHTML =
-          `<tr><td colspan="8" class="empty">Koi entry nahi. Naya ${type === 'sales' ? 'Invoice' : 'Bill'} banayein.</td></tr>`; return; }
+          `<tr><td colspan="${type === 'sales' ? 9 : 8}" class="empty">Koi entry nahi. Naya ${type === 'sales' ? 'Invoice' : 'Bill'} banayein.</td></tr>`; return; }
       tbody.innerHTML = data.map((r, i) => {
         const t = calcTotals(r.items);
         return `<tr>
+            ${type === 'sales' ? `<td><input type="checkbox" class="sale-checkbox" data-idx="${i}" onchange="updateSaleSelectionUI()"></td>` : ''}
             <td>${i+1}</td><td class="cell-strong">${r.invoiceNo}</td><td>${r.party}</td>
             <td>${niceDate(r.date)}</td><td>${r.items.length} item${r.items.length>1?'s':''}</td>
             <td class="cell-strong">${fmt(t.total)}</td><td>${badge(r.status)}</td>
@@ -593,11 +595,49 @@
             </td>
           </tr>`;
       }).join('');
+      if (type === 'sales') updateSaleSelectionUI();
     }
 
-    function editEntry(index, type) {
+    async function editEntry(index, type) {
+      if (!await verifyActionPassword(type === 'sales' ? 'Edit Sale Invoice' : 'Edit Purchase Bill')) return;
       const modalType = type === 'sales' ? 'sale' : 'purchase';
       openModal(modalType, index);
+    }
+
+    function toggleAllSales(cb) {
+      document.querySelectorAll('.sale-checkbox').forEach(c => c.checked = cb.checked);
+      updateSaleSelectionUI();
+    }
+
+    function updateSaleSelectionUI() {
+      const checked = document.querySelectorAll('.sale-checkbox:checked');
+      const btn = document.getElementById('delete-selected-sales-btn');
+      const countEl = document.getElementById('selected-sale-count');
+      if (btn && countEl) {
+        btn.style.display = checked.length ? 'inline-flex' : 'none';
+        countEl.textContent = checked.length;
+      }
+      const all = document.querySelectorAll('.sale-checkbox');
+      const selectAllCb = document.getElementById('select-all-sales');
+      if (selectAllCb) selectAllCb.indeterminate = checked.length > 0 && checked.length < all.length;
+      if (selectAllCb) selectAllCb.checked = all.length > 0 && checked.length === all.length;
+    }
+
+    async function deleteSelectedSales() {
+      const checked = document.querySelectorAll('.sale-checkbox:checked');
+      if (!checked.length) return;
+      if (!confirm(`Kya aap ${checked.length} selected sale invoices delete karna chahte hain?`)) return;
+      if (!await verifyActionPassword('Delete Selected Sale Invoices')) return;
+
+      const indices = Array.from(checked).map(c => parseInt(c.dataset.idx)).sort((a, b) => b - a);
+      indices.forEach(idx => {
+        const entry = store.sales[idx];
+        if (entry) adjustStockForInvoices(entry.items, 'add');
+        store.sales.splice(idx, 1);
+      });
+      await saveData();
+      renderTable('sales');
+      showToast('success', `${indices.length} sale invoices delete ho gaye!`);
     }
 
     // ─── RETURNS ──────────────────────────────────────────────────────────────
@@ -670,6 +710,7 @@
         const platClass = r.platform ? r.platform.toLowerCase() : '';
 
         return `<tr>
+            <td><input type="checkbox" class="return-checkbox" data-idx="${realIdx}" onchange="updateReturnSelectionUI()"></td>
             <td>${displayIdx+1}</td>
             <td><span class="badge ${platClass}">${(r.platform||'').toUpperCase()}</span></td>
             <td class="cell-strong">${esc(r.orderId)}</td>
@@ -687,15 +728,422 @@
       }).join('');
     }
 
+    function adjustStockForReturn(ret, action) {
+      if (!ret || ret.type !== 'RTO (Courier Return)') return;
+      const prod = findProduct(ret.productName);
+      if (!prod) return;
+      const delta = action === 'add' ? 1 : -1;
+      prod.stock = Math.max(0, (prod.stock || 0) + delta);
+      prod.packingStock = Math.max(0, (prod.packingStock || 0) + delta);
+    }
+
     async function deleteReturn(index) {
       if (!confirm('Kya aap sachme is return record ko delete karna chahte hain?')) return;
       if (await verifyActionPassword('Delete Return')) {
+        adjustStockForReturn(store.ecomReturns[index], 'sub');
         store.ecomReturns.splice(index, 1);
         await saveData();
         renderReturns();
         showToast('success', 'Return data removed');
       }
     }
+
+    // ─── MULTI-SELECT DELETE RETURNS ─────────────────────────────────────────
+    function toggleAllReturns(cb) {
+      document.querySelectorAll('.return-checkbox').forEach(c => c.checked = cb.checked);
+      updateReturnSelectionUI();
+    }
+
+    function updateReturnSelectionUI() {
+      const checked = document.querySelectorAll('.return-checkbox:checked');
+      const btn = document.getElementById('delete-selected-returns-btn');
+      const countEl = document.getElementById('selected-return-count');
+      if (checked.length > 0) {
+        btn.style.display = 'inline-flex';
+        countEl.textContent = checked.length;
+      } else {
+        btn.style.display = 'none';
+      }
+      const all = document.querySelectorAll('.return-checkbox');
+      const selectAllCb = document.getElementById('select-all-returns');
+      if (selectAllCb) selectAllCb.indeterminate = checked.length > 0 && checked.length < all.length;
+      if (selectAllCb) selectAllCb.checked = all.length > 0 && checked.length === all.length;
+    }
+
+    async function deleteSelectedReturns() {
+      const checked = document.querySelectorAll('.return-checkbox:checked');
+      if (!checked.length) return;
+      if (!confirm(`Kya aap ${checked.length} selected returns delete karna chahte hain?`)) return;
+      if (!await verifyActionPassword('Delete Selected Returns')) return;
+
+      const indices = Array.from(checked).map(c => parseInt(c.dataset.idx)).sort((a, b) => b - a);
+      indices.forEach(idx => {
+        adjustStockForReturn(store.ecomReturns[idx], 'sub');
+        store.ecomReturns.splice(idx, 1);
+      });
+      await saveData();
+      renderReturns();
+      document.getElementById('delete-selected-returns-btn').style.display = 'none';
+      showToast('success', `${indices.length} returns delete ho gaye!`);
+    }
+
+    async function deleteAllVisibleReturns() {
+      const matchesCurrentReturnFilter = r => {
+        const typeOk = returnFilterType === 'all' ||
+          (returnFilterType === 'courier' && r.type && r.type.includes('RTO')) ||
+          (returnFilterType === 'customer' && r.type === 'Customer Return');
+        const platformOk = returnFilterPlatform === 'all' ||
+          (r.platform && r.platform.toLowerCase() === returnFilterPlatform.toLowerCase());
+        return typeOk && platformOk;
+      };
+      const data = (store.ecomReturns || []).filter(matchesCurrentReturnFilter);
+
+      if (!data.length) { alert('Koi return nahi hai delete karne ke liye.'); return; }
+      if (!confirm(`Kya aap ${data.length} returns permanently delete karna chahte hain? Ye action undo nahi hoga!`)) return;
+      if (!await verifyActionPassword('Delete All Returns')) return;
+
+      const before = store.ecomReturns.length;
+      (store.ecomReturns || []).filter(matchesCurrentReturnFilter).forEach(r => adjustStockForReturn(r, 'sub'));
+      store.ecomReturns = (store.ecomReturns || []).filter(r => !matchesCurrentReturnFilter(r));
+      const deleted = before - store.ecomReturns.length;
+      await saveData();
+      renderReturns();
+      showToast('success', `${deleted} returns delete ho gaye!`);
+    }
+
+    // ─── REPORT EXPORTS ───────────────────────────────────────────────────────
+    function csvCell(value) {
+      const text = String(value ?? '');
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+
+    function downloadCSV(filename, headers, rows) {
+      const csv = [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\n');
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function exportSalesReport() {
+      const headers = ['Invoice No', 'Customer', 'Date', 'Due Date', 'Status', 'Items', 'Subtotal', 'GST', 'Total', 'Notes'];
+      const rows = store.sales.map(inv => {
+        const totals = calcTotals(inv.items || []);
+        const items = (inv.items || []).map(it => `${it.name} x ${it.qty} ${it.unit || ''} @ ${it.price}`).join('; ');
+        return [inv.invoiceNo, inv.party, inv.date, inv.due || '', inv.status, items, Math.round(totals.sub), Math.round(totals.gst), Math.round(totals.total), inv.notes || ''];
+      });
+      downloadCSV('sale_invoice_report.csv', headers, rows);
+      showToast('success', 'Sale invoice report download ho gaya.');
+    }
+
+    function exportPurchasesReport() {
+      const headers = ['Bill No', 'Vendor', 'Date', 'Due Date', 'Status', 'Items', 'Subtotal', 'GST', 'Total', 'Notes'];
+      const rows = store.purchases.map(inv => {
+        const totals = calcTotals(inv.items || []);
+        const items = (inv.items || []).map(it => `${it.name} x ${it.qty} ${it.unit || ''} @ ${it.price}`).join('; ');
+        return [inv.invoiceNo, inv.party, inv.date, inv.due || '', inv.status, items, Math.round(totals.sub), Math.round(totals.gst), Math.round(totals.total), inv.notes || ''];
+      });
+      downloadCSV('purchase_bill_report.csv', headers, rows);
+      showToast('success', 'Purchase bill report download ho gaya.');
+    }
+
+    function exportCustomersReport() {
+      const headers = ['Customer Name', 'Phone', 'GSTIN', 'Address', 'Total Bills', 'Total Amount', 'Paid Amount', 'Pending Amount'];
+      const rows = store.customers.map(c => {
+        const invoices = store.sales.filter(s => s.party === c.name);
+        const total = invoices.reduce((sum, inv) => sum + calcTotals(inv.items || []).total, 0);
+        const paid = invoices.filter(inv => inv.status === 'paid').reduce((sum, inv) => sum + calcTotals(inv.items || []).total, 0);
+        return [c.name, c.phone || '', c.gstin || '', c.address || '', invoices.length, Math.round(total), Math.round(paid), Math.round(total - paid)];
+      });
+      downloadCSV('customer_report.csv', headers, rows);
+      showToast('success', 'Customer report download ho gaya.');
+    }
+
+    function getReturnsForReport(kind = 'all') {
+      return (store.ecomReturns || []).filter(r => {
+        if (kind === 'rto') return r.type && r.type.includes('RTO');
+        if (kind === 'customer') return r.type === 'Customer Return';
+        if (kind === 'visible') {
+          const typeOk = returnFilterType === 'all' ||
+            (returnFilterType === 'courier' && r.type && r.type.includes('RTO')) ||
+            (returnFilterType === 'customer' && r.type === 'Customer Return');
+          const platformOk = returnFilterPlatform === 'all' ||
+            (r.platform && r.platform.toLowerCase() === returnFilterPlatform.toLowerCase());
+          return typeOk && platformOk;
+        }
+        return true;
+      });
+    }
+
+    function exportReturnsReport(kind = 'all') {
+      const labels = { all: 'all_returns_report', rto: 'rto_return_report', customer: 'customer_return_report', visible: 'visible_returns_report' };
+      const headers = ['Platform', 'Order ID / AWB', 'Product Name', 'Return Date', 'Return Type', 'Status', 'Claim / Refund Amount'];
+      const rows = getReturnsForReport(kind).map(r => [r.platform || '', r.orderId || '', r.productName || '', r.date || '', r.type || '', r.status || '', r.amount || 0]);
+      downloadCSV(`${labels[kind] || labels.all}.csv`, headers, rows);
+      showToast('success', 'Return report download ho gaya.');
+    }
+
+    function collectBulkReturnRows() {
+      return Array.from(document.querySelectorAll('#bulk-rows-body tr')).map(tr => [
+        tr.querySelector('.bulk-platform')?.value || '',
+        tr.querySelector('.bulk-orderid')?.value.trim() || '',
+        tr.querySelector('.bulk-pname')?.value.trim() || '',
+        tr.querySelector('.bulk-date')?.value || '',
+        tr.querySelector('.bulk-type')?.value || '',
+        tr.querySelector('.bulk-status')?.value || '',
+        tr.querySelector('.bulk-amount')?.value || 0
+      ]);
+    }
+
+    function exportBulkReturnsToExcel() {
+      const headers = ['Platform', 'Order ID', 'Product Name', 'Date', 'Return Type', 'Status', 'Amount'];
+      let rows = collectBulkReturnRows().filter(row => row.some(v => String(v).trim() !== '' && String(v).trim() !== '0'));
+      if (!rows.length) {
+        rows = [['meesho', 'ORD123', 'Red T-Shirt', new Date().toISOString().split('T')[0], 'RTO (Courier Return)', 'pending', 499]];
+      }
+      downloadCSV('bulk_return_rows.csv', headers, rows);
+      showToast('success', 'Bulk return Excel/CSV download ho gaya.');
+    }
+
+    function exportMainReport() {
+      const salesRows = store.sales.map(inv => {
+        const totals = calcTotals(inv.items || []);
+        return [inv.invoiceNo, inv.party, inv.date, inv.status, Math.round(totals.sub), Math.round(totals.gst), Math.round(totals.total)];
+      });
+      const purchaseRows = store.purchases.map(inv => {
+        const totals = calcTotals(inv.items || []);
+        return [inv.invoiceNo, inv.party, inv.date, inv.status, Math.round(totals.sub), Math.round(totals.gst), Math.round(totals.total)];
+      });
+      const customerRows = store.customers.map(c => {
+        const invoices = store.sales.filter(s => s.party === c.name);
+        const total = invoices.reduce((sum, inv) => sum + calcTotals(inv.items || []).total, 0);
+        return [c.name, c.phone || '', c.gstin || '', c.address || '', invoices.length, Math.round(total)];
+      });
+      const returnRows = (kind = 'all') => getReturnsForReport(kind).map(r => [r.platform || '', r.orderId || '', r.productName || '', r.date || '', r.type || '', r.status || '', r.amount || 0]);
+      const productRows = store.products.map(p => [p.name, p.unit || '', p.salePrice || 0, p.purchasePrice || 0, p.gst || 0, p.stock || 0, p.packingStock || 0]);
+      const totalSales = store.sales.reduce((sum, inv) => sum + calcTotals(inv.items || []).total, 0);
+      const totalPurchases = store.purchases.reduce((sum, inv) => sum + calcTotals(inv.items || []).total, 0);
+
+      if (window.XLSX) {
+        const wb = XLSX.utils.book_new();
+        const addSheet = (name, rows) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), name);
+        addSheet('Summary', [
+          ['Metric', 'Value'],
+          ['Total Sales', Math.round(totalSales)],
+          ['Total Purchases', Math.round(totalPurchases)],
+          ['Total Customers', store.customers.length],
+          ['Total Products', store.products.length],
+          ['All Returns', (store.ecomReturns || []).length],
+          ['RTO Returns', getReturnsForReport('rto').length],
+          ['Customer Returns', getReturnsForReport('customer').length]
+        ]);
+        addSheet('Sales', [['Invoice No', 'Customer', 'Date', 'Status', 'Subtotal', 'GST', 'Total'], ...salesRows]);
+        addSheet('Customers', [['Name', 'Phone', 'GSTIN', 'Address', 'Total Bills', 'Total Amount'], ...customerRows]);
+        addSheet('Returns All', [['Platform', 'Order ID', 'Product', 'Date', 'Type', 'Status', 'Amount'], ...returnRows('all')]);
+        addSheet('RTO Returns', [['Platform', 'Order ID', 'Product', 'Date', 'Type', 'Status', 'Amount'], ...returnRows('rto')]);
+        addSheet('Customer Returns', [['Platform', 'Order ID', 'Product', 'Date', 'Type', 'Status', 'Amount'], ...returnRows('customer')]);
+        addSheet('Products', [['Product', 'Unit', 'Sale Price', 'Purchase Price', 'GST%', 'Stock', 'Packing Stock'], ...productRows]);
+        addSheet('Purchases', [['Bill No', 'Vendor', 'Date', 'Status', 'Subtotal', 'GST', 'Total'], ...purchaseRows]);
+        XLSX.writeFile(wb, 'billpro_main_report.xlsx');
+      } else {
+        downloadCSV('billpro_main_summary.csv', ['Metric', 'Value'], [
+          ['Total Sales', Math.round(totalSales)],
+          ['Total Purchases', Math.round(totalPurchases)],
+          ['Total Customers', store.customers.length],
+          ['Total Products', store.products.length],
+          ['All Returns', (store.ecomReturns || []).length]
+        ]);
+      }
+      showToast('success', 'Main report download ho gaya.');
+    }
+
+    // ─── PRODUCTS EXCEL IMPORT/EXPORT ────────────────────────────────────────
+    function exportProductsToExcel() {
+      const headers = ['Product Name','Unit','Sale Price','Purchase Price','GST%','Stock'];
+      const rows = store.products.map(p => [
+        p.name, p.unit||'pcs', p.salePrice||0, p.purchasePrice||0, p.gst||0, p.stock||0
+      ]);
+
+      // Build CSV (Excel compatible)
+      const csvContent = [headers, ...rows].map(row =>
+        row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')
+      ).join('\n');
+
+      const BOM = '\uFEFF'; // for Excel UTF-8
+      const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'products_list.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('success', 'Products Excel/CSV download ho gaya!');
+    }
+
+    function openProductExcelImport() {
+      document.getElementById('product-excel-import-modal').classList.add('open');
+      document.getElementById('product-import-file').value = '';
+      document.getElementById('product-import-paste').value = '';
+      document.getElementById('product-import-preview').innerHTML = '';
+      document.getElementById('product-import-save-btn').style.display = 'none';
+      window._productImportData = [];
+    }
+
+    function closeProductExcelImport() {
+      document.getElementById('product-excel-import-modal').classList.remove('open');
+    }
+
+    function handleProductImportFile(input) {
+      const file = input.files[0];
+      if (!file) return;
+      const ext = file.name.split('.').pop().toLowerCase();
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        if ((ext === 'xlsx' || ext === 'xls') && window.XLSX) {
+          const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+          parseProductImportRows(rows);
+        } else {
+          const text = String(e.target.result || '').replace(/^\uFEFF/, '');
+          parseProductImportText(text);
+        }
+      };
+      if ((ext === 'xlsx' || ext === 'xls') && window.XLSX) reader.readAsArrayBuffer(file);
+      else reader.readAsText(file, 'UTF-8');
+    }
+
+    function parseProductImportPaste() {
+      const text = document.getElementById('product-import-paste').value.trim();
+      if (!text) { alert('Paste box mein product data daalein.'); return; }
+      parseProductImportText(text);
+    }
+
+    function parseProductImportText(text) {
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+      if (!lines.length) { alert('Data mein koi product nahi mila.'); return; }
+      const sep = lines[0].includes('\t') ? '\t' : lines[0].includes('|') ? '|' : ',';
+
+      const rows = lines.map(line => {
+        const cols = [];
+        let cur = '',
+          inQ = false;
+        for (let ch of line) {
+          if (ch === '"') { inQ = !inQ; }
+          else if (ch === sep && !inQ) { cols.push(cur.trim()); cur = ''; }
+          else { cur += ch; }
+        }
+        cols.push(cur.trim());
+        return cols;
+      });
+      parseProductImportRows(rows);
+    }
+
+    function parseProductImportRows(rows) {
+      rows = rows.map(row => row.map(cell => String(cell ?? '').trim())).filter(row => row.some(Boolean));
+      if (!rows.length) { alert('Data mein koi product nahi mila.'); return; }
+
+      const firstRow = rows[0].map(h => h.toLowerCase().replace(/[^a-z]/g, ''));
+      const hasHeader = firstRow.some(h => h.includes('name') || h.includes('product') || h.includes('sale') || h.includes('purchase') || h.includes('stock'));
+      const header = hasHeader ? firstRow : ['productname', 'unit', 'saleprice', 'purchaseprice', 'gst', 'stock'];
+      const dataRows = hasHeader ? rows.slice(1) : rows;
+      const nameCol = header.findIndex(h => h.includes('name') || h.includes('product'));
+      const unitCol = header.findIndex(h => h.includes('unit'));
+      const saleCol = header.findIndex(h => h.includes('sale') || h.includes('sprice'));
+      const purCol = header.findIndex(h => h.includes('purchase') || h.includes('pprice'));
+      const gstCol = header.findIndex(h => h.includes('gst'));
+      const stockCol = header.findIndex(h => h.includes('stock'));
+
+      const parsed = [];
+      const errors = [];
+
+      dataRows.forEach((cols, i) => {
+        const clean = value => String(value ?? '').replace(/^"|"$/g, '').trim();
+        const num = value => parseFloat(clean(value).replace(/[^0-9.-]/g, '')) || 0;
+        const name = clean(nameCol >= 0 ? cols[nameCol] : cols[0]);
+        if (!name) { errors.push(`Row ${i + 1}: Product Name missing, skip`); return; }
+        parsed.push({
+          name,
+          unit: clean(unitCol >= 0 ? cols[unitCol] : cols[1]) || 'pcs',
+          salePrice: num(saleCol >= 0 ? cols[saleCol] : cols[2]),
+          purchasePrice: num(purCol >= 0 ? cols[purCol] : cols[3]),
+          gst: num(gstCol >= 0 ? cols[gstCol] : cols[4]),
+          stock: num(stockCol >= 0 ? cols[stockCol] : cols[5]),
+          packingStock: 0
+        });
+      });
+
+      window._productImportData = parsed;
+
+      let previewHTML = `<div style="margin-bottom:10px;font-size:13px;color:var(--muted);">
+        <strong style="color:var(--green)">${parsed.length} products</strong> import ke liye ready${errors.length ? `, <strong style="color:var(--red)">${errors.length} rows skip</strong> (missing name)` : ''}
+      </div>`;
+
+      if (parsed.length > 0) {
+        previewHTML += `<div class="table-wrap" style="max-height:280px;overflow-y:auto;">
+          <table>
+            <thead><tr><th>#</th><th>Name</th><th>Unit</th><th>Sale Price</th><th>Purchase Price</th><th>GST%</th><th>Stock</th><th>Status</th></tr></thead>
+            <tbody>${parsed.map((p, i) => {
+              const exists = store.products.some(sp => sp.name.toLowerCase() === p.name.toLowerCase());
+              return `<tr>
+                <td>${i+1}</td><td><strong>${esc(p.name)}</strong></td><td>${p.unit}</td>
+                <td>${fmt(p.salePrice)}</td><td>${fmt(p.purchasePrice)}</td><td>${p.gst}%</td><td>${p.stock}</td>
+                <td>${exists ? '<span class="badge pending">⚠ Update</span>' : '<span class="badge paid">✅ New</span>'}</td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table>
+        </div>`;
+        document.getElementById('product-import-save-btn').style.display = 'inline-flex';
+      }
+
+      document.getElementById('product-import-preview').innerHTML = previewHTML;
+    }
+
+    async function saveProductImport() {
+      const data = window._productImportData || [];
+      if (!data.length) { alert('Koi data nahi.'); return; }
+      if (!await verifyActionPassword('Product Bulk Update')) return;
+
+      const mode = document.querySelector('input[name="import-mode"]:checked')?.value || 'merge';
+      let added = 0, updated = 0;
+
+      if (mode === 'replace') {
+        if (!confirm(`Warning: Replace mode mein existing saare products delete ho jayenge aur sirf imported products rahenge. Confirm?`)) return;
+        store.products = data.map(p => ({ ...p }));
+        added = data.length;
+      } else {
+        data.forEach(p => {
+          const idx = store.products.findIndex(sp => sp.name.toLowerCase() === p.name.toLowerCase());
+          if (idx >= 0) {
+            store.products[idx] = { ...store.products[idx], ...p, packingStock: store.products[idx].packingStock || 0 };
+            updated++;
+          } else {
+            store.products.push({ ...p });
+            added++;
+          }
+        });
+      }
+
+      if (!await (async () => { if (!currentUser) return false; return true; })()) return;
+      await saveData();
+      closeProductExcelImport();
+      renderProducts();
+      showToast('success', `Import complete! ${added > 0 ? `${added} new` : ''}${updated > 0 ? `, ${updated} updated` : ''}`);
+    }
+
+    async function deleteAllProducts() {
+      if (!store.products.length) { alert('Koi product delete karne ke liye nahi hai.'); return; }
+      if (!confirm(`Kya aap ${store.products.length} products delete karna chahte hain? Ye action undo nahi hoga!`)) return;
+      if (!await verifyActionPassword('Delete All Products')) return;
+      store.products = [];
+      await saveData();
+      renderProducts();
+      updateProductList();
+      showToast('success', 'Saare products delete ho gaye.');
+    }
+
 
     function createSaleFromReturn(index) {
       if (!store.ecomReturns || !store.ecomReturns[index]) {
@@ -746,7 +1194,8 @@
     }
 
     // ─── FIX: RETURN MODAL OPEN/SAVE with robust index handling ──────────────
-    function openReturnModal(idx = -1) {
+    async function openReturnModal(idx = -1) {
+      if (idx >= 0 && !await verifyActionPassword('Edit Return')) return;
       editReturnIndex = idx;
       updateProductList();
       const today = new Date().toISOString().split('T')[0];
@@ -804,21 +1253,15 @@
 
         const payload = { platform, orderId, productName, date, type, status, amount };
 
-        if (type === 'RTO (Courier Return)') {
-          const prod = findProduct(productName);
-          if (prod) {
-            prod.stock = (prod.stock || 0) + 1;
-            prod.packingStock = (prod.packingStock || 0) + 1;
-            showToast('success', `Stock +1, Packing +1 for ${productName} (RTO)`);
-          }
-        }
-
         if (!store.ecomReturns) store.ecomReturns = [];
 
         if (idx >= 0 && idx < store.ecomReturns.length) {
+          adjustStockForReturn(store.ecomReturns[idx], 'sub');
+          adjustStockForReturn(payload, 'add');
           store.ecomReturns[idx] = payload;
           showToast('success', 'Return record updated successfully!');
         } else {
+          adjustStockForReturn(payload, 'add');
           store.ecomReturns.push(payload);
           showToast('success', 'New Return record logged!');
         }
@@ -886,6 +1329,91 @@
       updateBulkCount();
     }
 
+    function parseBulkPaste() {
+      const raw = document.getElementById('bulk-paste-area').value;
+      const lines = raw.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      if (!lines.length) {
+        alert('Pehle textarea mein data paste karein.');
+        return;
+      }
+
+      const validPlatforms = ['meesho', 'amazon', 'flipkart', 'myntra', 'flex'];
+      const validTypes = ['Customer Return', 'RTO (Courier Return)'];
+      const validStatuses = ['pending', 'received', 'damaged', 'claim_filed', 'claim_approved'];
+      const today = new Date().toISOString().split('T')[0];
+
+      // Remove any existing rows that are still empty (untouched default rows),
+      // so pasted data isn't mixed up with leftover blank rows.
+      document.querySelectorAll('#bulk-rows-body tr').forEach(tr => {
+        const orderId = tr.querySelector('.bulk-orderid').value.trim();
+        const productName = tr.querySelector('.bulk-pname').value.trim();
+        const amount = tr.querySelector('.bulk-amount').value.trim();
+        if (!orderId && !productName && (amount === '' || amount === '0')) {
+          tr.remove();
+        }
+      });
+
+      let addedCount = 0;
+      let skippedCount = 0;
+
+      lines.forEach(line => {
+        // auto-detect separator: tab takes priority if present, else comma
+        const parts = (line.includes('\t') ? line.split('\t') : line.split(',')).map(p => p.trim());
+
+        // find product name: only required field. If just one column was pasted, treat it as product name.
+        let [platformRaw, orderId, productName, dateRaw, typeRaw, statusRaw, amountRaw] = parts;
+        if (parts.length === 1) {
+          productName = parts[0];
+          platformRaw = orderId = dateRaw = typeRaw = statusRaw = amountRaw = '';
+        }
+
+        productName = (productName || '').trim();
+        if (!productName) {
+          skippedCount++;
+          return;
+        }
+
+        let platform = (platformRaw || '').toLowerCase().trim();
+        if (!validPlatforms.includes(platform)) platform = 'meesho';
+
+        let date = (dateRaw || '').trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) date = today;
+
+        let type = (typeRaw || '').trim();
+        const typeMatch = validTypes.find(t => t.toLowerCase() === type.toLowerCase());
+        type = typeMatch || 'Customer Return';
+
+        let status = (statusRaw || '').toLowerCase().trim().replace(/\s+/g, '_');
+        if (!validStatuses.includes(status)) status = 'pending';
+
+        let amount = parseFloat((amountRaw || '').replace(/[^\d.]/g, '')) || 0;
+
+        addBulkRow({
+          platform,
+          orderId: (orderId || '').trim(),
+          productName,
+          date,
+          type,
+          status,
+          amount
+        });
+        addedCount++;
+      });
+
+      document.getElementById('bulk-paste-area').value = '';
+
+      if (addedCount > 0) {
+        showToast('success', `${addedCount} rows table mein add ho gayi${skippedCount ? `, ${skippedCount} line(s) skip hui (Product Name missing)` : ''}.`);
+      } else {
+        alert('Koi valid row nahi mili. Har line mein kam se kam Product Name hona chahiye.');
+      }
+
+      // safety net: never leave the table completely empty
+      if (document.getElementById('bulk-rows-body').children.length === 0) {
+        addBulkRow();
+      }
+    }
+
     function removeBulkRow(btn) {
       const tr = btn.closest('tr');
       if (document.getElementById('bulk-rows-body').children.length <= 1) {
@@ -921,7 +1449,7 @@
         const status = tr.querySelector('.bulk-status').value;
         const amount = parseFloat(tr.querySelector('.bulk-amount').value) || 0;
 
-        if (!platform || !orderId || !productName || !date) {
+        if (!platform || !productName || !date) {
           hasError = true;
           tr.style.backgroundColor = '#ffeeee';
         } else {
@@ -938,7 +1466,7 @@
       });
 
       if (hasError) {
-        alert('Kuch rows mein Platform, Order ID, Product Name ya Date missing hai. Red highlight wali rows ko theek karein.');
+        alert('Kuch rows mein Product Name ya Date missing hai. Red highlight wali rows ko theek karein.');
         return;
       }
 
@@ -1360,7 +1888,8 @@
       updateTotals();
     }
 
-    function openProductModal(idx = -1) {
+    async function openProductModal(idx = -1) {
+      if (idx >= 0 && !await verifyActionPassword('Edit Product')) return;
       editProductIndex = idx;
       if (idx >= 0) {
         const p = store.products[idx];
@@ -1772,6 +2301,7 @@
     window.closeReturnModal = closeReturnModal;
     window.openBulkReturnModal = openBulkReturnModal;
     window.closeBulkReturnModal = closeBulkReturnModal;
+    window.parseBulkPaste = parseBulkPaste;
     window.openEmpSetupModal = openEmpSetupModal;
     window.closeEmpSetupModal = closeEmpSetupModal;
     window.closePremiumModal = closePremiumModal;
@@ -1786,6 +2316,9 @@
     window.filterTable = filterTable;
     window.editEntry = editEntry;
     window.deleteEntry = deleteEntry;
+    window.toggleAllSales = toggleAllSales;
+    window.updateSaleSelectionUI = updateSaleSelectionUI;
+    window.deleteSelectedSales = deleteSelectedSales;
     window.openInvoiceView = openInvoiceView;
     window.printInvoice = printInvoice;
     window.handleEmployeesNavClick = handleEmployeesNavClick;
@@ -1794,6 +2327,10 @@
     window.setReturnType = setReturnType;
     window.setReturnPlatform = setReturnPlatform;
     window.deleteReturn = deleteReturn;
+    window.toggleAllReturns = toggleAllReturns;
+    window.updateReturnSelectionUI = updateReturnSelectionUI;
+    window.deleteSelectedReturns = deleteSelectedReturns;
+    window.deleteAllVisibleReturns = deleteAllVisibleReturns;
     window.employeeLogin = employeeLogin;
     window.closeEmpLoginModal = closeEmpLoginModal;
     window.resetEmployeeCredentialsPrompt = resetEmployeeCredentialsPrompt;
@@ -1813,6 +2350,21 @@
     // ─── FIX: EXPOSE DELETE FUNCTIONS ──────────────────────────────────────
     window.deleteParty = deleteParty;
     window.deleteProduct = deleteProduct;
+    window.deleteAllProducts = deleteAllProducts;
+    window.exportSalesReport = exportSalesReport;
+    window.exportPurchasesReport = exportPurchasesReport;
+    window.exportCustomersReport = exportCustomersReport;
+    window.updateTotals = updateTotals;
+    window.renderCustomerLedger = renderCustomerLedger;
+    window.exportReturnsReport = exportReturnsReport;
+    window.exportBulkReturnsToExcel = exportBulkReturnsToExcel;
+    window.exportMainReport = exportMainReport;
+    window.exportProductsToExcel = exportProductsToExcel;
+    window.openProductExcelImport = openProductExcelImport;
+    window.closeProductExcelImport = closeProductExcelImport;
+    window.handleProductImportFile = handleProductImportFile;
+    window.parseProductImportPaste = parseProductImportPaste;
+    window.saveProductImport = saveProductImport;
     window.saveReturn = saveReturn;
     window.closeCustomerLedger = closeCustomerLedger;
     window.deleteEmployeeRecord = deleteEmployeeRecord;
@@ -3916,6 +4468,10 @@
 
         <!-- DASHBOARD -->
         <div class="page active" id="page-dashboard">
+          <div class="toolbar">
+            <div></div>
+            <button class="btn" onclick="exportMainReport()" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i>Main Report Excel</button>
+          </div>
           <div class="dashboard-grid" id="dash-stats"></div>
           <div class="split-grid">
             <div class="card">
@@ -3956,14 +4512,20 @@
           <div class="toolbar">
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text"
                 placeholder="Search invoices..." oninput="filterTable('sales-table',this.value)"></div>
-            <button class="btn primary" onclick="openModal('sale')"><i class="ti ti-plus"></i>New Sale
-              Invoice</button>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn primary" onclick="openModal('sale')"><i class="ti ti-plus"></i>New Sale
+                Invoice</button>
+              <button class="btn" onclick="exportSalesReport()" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i>Report Excel</button>
+              <button class="btn danger" id="delete-selected-sales-btn" onclick="deleteSelectedSales()" style="display:none;border-color:var(--red);color:var(--red);background:#fff3f3;">
+                <i class="ti ti-trash"></i>Selected Delete (<span id="selected-sale-count">0</span>)
+              </button>
+            </div>
           </div>
           <div class="card">
             <div class="table-wrap">
               <table id="sales-table">
                 <thead>
-                  <tr><th>#</th><th>Invoice No</th><th>Party Name</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th>Actions</th></tr>
+                  <tr><th style="width:36px;"><input type="checkbox" id="select-all-sales" onclick="toggleAllSales(this)" title="Sab select/deselect"></th><th>#</th><th>Invoice No</th><th>Party Name</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th>Actions</th></tr>
                 </thead>
                 <tbody id="sales-tbody"></tbody>
               </table>
@@ -3985,6 +4547,15 @@
               </button>
               <button class="btn primary" onclick="openOrderMatchModal()" style="background:var(--amber); border-color:var(--amber);">
                 <i class="ti ti-file-spreadsheet"></i> Match New Orders
+              </button>
+              <button class="btn" onclick="exportReturnsReport('all')" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i>All Report</button>
+              <button class="btn" onclick="exportReturnsReport('rto')" style="border-color:var(--amber);color:var(--amber);"><i class="ti ti-download"></i>RTO Report</button>
+              <button class="btn" onclick="exportReturnsReport('customer')" style="border-color:var(--green);color:var(--green);"><i class="ti ti-download"></i>Customer Return Report</button>
+              <button class="btn danger" id="delete-selected-returns-btn" onclick="deleteSelectedReturns()" style="display:none;">
+                <i class="ti ti-trash"></i>Selected Delete (<span id="selected-return-count">0</span>)
+              </button>
+              <button class="btn danger" onclick="deleteAllVisibleReturns()" style="border-color:var(--red);color:var(--red);background:#fff3f3;">
+                <i class="ti ti-trash"></i>Delete All
               </button>
             </div>
           </div>
@@ -4017,7 +4588,7 @@
             <div class="table-wrap">
               <table id="returns-table">
                 <thead>
-                  <tr><th>#</th><th>Platform</th><th>Order ID / AWB</th><th>Product Name</th><th>Return Date</th><th>Return Type</th><th>Status</th><th>Claim Amt</th><th>Actions</th></tr>
+                  <tr><th style="width:36px;"><input type="checkbox" id="select-all-returns" onclick="toggleAllReturns(this)" title="Sab select/deselect"></th><th>#</th><th>Platform</th><th>Order ID / AWB</th><th>Product Name</th><th>Return Date</th><th>Return Type</th><th>Status</th><th>Claim Amt</th><th>Actions</th></tr>
                 </thead>
                 <tbody id="returns-tbody"></tbody>
               </table>
@@ -4030,8 +4601,11 @@
           <div class="toolbar">
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text"
                 placeholder="Search bills..." oninput="filterTable('purchase-table',this.value)"></div>
-            <button class="btn primary" onclick="openModal('purchase')"><i class="ti ti-plus"></i>New Purchase
-              Bill</button>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn primary" onclick="openModal('purchase')"><i class="ti ti-plus"></i>New Purchase
+                Bill</button>
+              <button class="btn" onclick="exportPurchasesReport()" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i>Report Excel</button>
+            </div>
           </div>
           <div class="card">
             <div class="table-wrap">
@@ -4051,8 +4625,11 @@
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text"
                 placeholder="Search customers..." oninput="filterTable('customers-table',this.value)">
             </div>
-            <button class="btn primary" onclick="openPartyModal('customer')"><i class="ti ti-plus"></i>Add
-              Customer</button>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn primary" onclick="openPartyModal('customer')"><i class="ti ti-plus"></i>Add
+                Customer</button>
+              <button class="btn" onclick="exportCustomersReport()" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i>Report Excel</button>
+            </div>
           </div>
           <div class="card">
             <div class="table-wrap">
@@ -4071,8 +4648,12 @@
           <div class="toolbar">
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text"
                 placeholder="Search products..." oninput="filterTable('products-table',this.value)"></div>
-            <button class="btn primary" onclick="openProductModal()"><i class="ti ti-plus"></i>Add
-              Product</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn primary" onclick="openProductModal()"><i class="ti ti-plus"></i>Add Product</button>
+              <button class="btn primary" onclick="openProductExcelImport()" style="background:var(--green);border-color:var(--green);"><i class="ti ti-file-spreadsheet"></i>Excel se Import</button>
+              <button class="btn" onclick="exportProductsToExcel()" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i>Excel Export</button>
+              <button class="btn danger" onclick="deleteAllProducts()" style="border-color:var(--red);color:var(--red);background:#fff3f3;"><i class="ti ti-trash"></i>Delete All</button>
+            </div>
           </div>
           <div class="card">
             <div class="table-wrap">
@@ -4152,8 +4733,20 @@
     <div class="modal" style="width:96vw; max-width:1100px;">
       <div class="modal-head"><h2><i class="ti ti-list"></i> Bulk Add Returns</h2><button class="btn sm icon" onclick="closeBulkReturnModal()"><i class="ti ti-x"></i></button></div>
       <div class="modal-body" style="padding:16px;">
+        <div style="margin-bottom:14px; padding:12px; background:#f7f9fb; border:1px dashed var(--line); border-radius:var(--radius);">
+          <label style="font-weight:700; font-size:13px; display:block; margin-bottom:6px;">📋 Notepad se Bulk Paste karein</label>
+          <p style="font-size:12px; color:var(--muted); margin:0 0 8px;">Har line ek return entry. Columns ko <strong>Tab</strong> ya <strong>Comma</strong> se alag karein (jo bhi aapke Notepad mein hai, system khud detect kar lega).<br>
+          Order: <strong>Platform, Order ID, Product Name, Date, Return Type, Status, Amount</strong> — <strong>sirf Product Name zaroori hai</strong>, baaki khali chhod sakte hain.<br>
+          Example: <code>meesho, ORD123, Red T-Shirt, 2026-06-17, RTO (Courier Return), pending, 499</code></p>
+          <textarea id="bulk-paste-area" rows="5" placeholder="meesho, ORD123, Red T-Shirt, 2026-06-17, RTO (Courier Return), pending, 499&#10;flipkart, , Blue Jeans, 2026-06-17, Customer Return, received, 899&#10;Black Shoes" style="width:100%; border:1px solid var(--line); border-radius:var(--radius); padding:10px; font-size:13px; font-family:inherit;"></textarea>
+          <div style="margin-top:8px; display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="btn sm primary" onclick="parseBulkPaste()"><i class="ti ti-clipboard-plus"></i> Paste ko Rows mein Convert karein</button>
+            <span style="font-size:12px; color:var(--muted); align-self:center;">Rows neeche table mein add ho jayengi (existing rows ke saath)</span>
+          </div>
+        </div>
         <div style="margin-bottom:12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
           <button class="btn sm primary" onclick="addBulkRow()"><i class="ti ti-plus"></i> Add Row</button>
+          <button class="btn sm" onclick="exportBulkReturnsToExcel()" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i> Export Excel</button>
           <button class="btn sm danger" onclick="clearBulkRows()"><i class="ti ti-trash"></i> Clear All</button>
           <span style="font-size:12px; color:var(--muted); margin-left:8px;">Fill multiple returns and click Save All</span>
         </div>
@@ -4351,6 +4944,49 @@
         <button class="btn primary" onclick="performMatch()"><i class="ti ti-search"></i> Match with RTO Stock</button>
         <div class="order-match-result" id="match-result-area" style="display:none;"></div>
         <p style="font-size:12px; color:var(--muted); margin-top:8px;">💡 <strong>Total Stock</strong> = Product master ka total stock (purchase + RTO - sales) | <strong>Packing Stock</strong> = Sirf RTO returns se aaya stock (packing ke liye available).</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Product Excel Import Modal -->
+  <div class="modal-bg" id="product-excel-import-modal">
+    <div class="modal" style="width:820px; max-width:96vw;">
+      <div class="modal-head"><h2><i class="ti ti-file-spreadsheet"></i> Excel / CSV se Products Import</h2><button class="btn sm icon" onclick="closeProductExcelImport()"><i class="ti ti-x"></i></button></div>
+      <div class="modal-body" style="padding:20px;">
+        <div style="background:#f0f9f4;border:1px dashed var(--green);border-radius:var(--radius);padding:14px;margin-bottom:16px;font-size:13px;">
+          <strong>📋 Format Guide:</strong> Excel/CSV file mein ye columns hone chahiye (header row zaroori hai):<br>
+          <code style="background:#e8f5e9;padding:2px 8px;border-radius:4px;font-size:12px;">Product Name, Unit, Sale Price, Purchase Price, GST%, Stock</code><br>
+          <span style="color:var(--muted);">Sirf <strong>Product Name</strong> column compulsory hai. Baaki columns optional hain. Column order auto-detect hoga.</span>
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <label style="font-weight:700;font-size:13px;display:block;margin-bottom:8px;">📁 CSV / Excel File Select karein</label>
+          <input type="file" id="product-import-file" accept=".csv,.xls,.xlsx,.txt" onchange="handleProductImportFile(this)"
+            style="border:1px solid var(--line);border-radius:var(--radius);padding:8px;width:100%;font-size:13px;cursor:pointer;">
+          <p style="font-size:12px;color:var(--muted);margin-top:6px;">Excel (.xlsx), CSV, TXT, ya tab-separated Notepad data chalega.</p>
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <label style="font-weight:700;font-size:13px;display:block;margin-bottom:8px;">Notepad / Excel se copy-paste</label>
+          <textarea id="product-import-paste" rows="6" placeholder="Product Name, Unit, Sale Price, Purchase Price, GST%, Stock&#10;Shirt, pcs, 499, 300, 5, 20&#10;Jeans, pcs, 999, 650, 5, 10" style="border:1px solid var(--line);border-radius:var(--radius);padding:10px;width:100%;font-size:13px;resize:vertical;"></textarea>
+          <button class="btn sm primary" onclick="parseProductImportPaste()" style="margin-top:8px;background:var(--blue);border-color:var(--blue);"><i class="ti ti-clipboard-plus"></i>Paste Preview</button>
+        </div>
+
+        <div style="margin-bottom:14px;display:flex;gap:20px;align-items:center;">
+          <label style="font-weight:700;font-size:13px;">Import Mode:</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+            <input type="radio" name="import-mode" value="merge" checked> <span>Merge (Existing update, New add)</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+            <input type="radio" name="import-mode" value="replace"> <span style="color:var(--red);">Replace All (Purane delete, naye add)</span>
+          </label>
+        </div>
+
+        <div id="product-import-preview"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeProductExcelImport()">Cancel</button>
+        <button class="btn primary" id="product-import-save-btn" onclick="saveProductImport()" style="display:none;background:var(--green);border-color:var(--green);"><i class="ti ti-device-floppy"></i> Import Save Karein</button>
       </div>
     </div>
   </div>
