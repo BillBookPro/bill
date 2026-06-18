@@ -2555,10 +2555,53 @@
     }
 
     // ── STORAGE ─────────────────────────────────────────────────────────────
+    let ssSaveTimer = null;
+
     function ssSave() {
+      // LocalStorage mein bhi save karo (instant backup)
       try { localStorage.setItem('billpro_ss', JSON.stringify({ books: ssBooks, order: ssSheetOrder, active: ssActiveSheet })); } catch(e) {}
+
+      // Firebase mein save karo (debounced - 1.5 sec baad taaki bar bar na save ho)
+      if (ssSaveTimer) clearTimeout(ssSaveTimer);
+      ssSaveTimer = setTimeout(async () => {
+        if (!window._fbDb || !window._fbFns || !currentUser) return;
+        try {
+          const { doc, setDoc } = window._fbFns;
+          const ssData = { books: ssBooks, order: ssSheetOrder, active: ssActiveSheet };
+          await setDoc(
+            doc(window._fbDb, 'users', currentUser),
+            { spreadsheetData: ssData },
+            { merge: true }
+          );
+        } catch(e) {
+          console.warn('Spreadsheet Firebase save error:', e);
+        }
+      }, 1500);
     }
-    function ssLoad() {
+
+    async function ssLoad() {
+      // Pehle Firebase se load karo
+      if (window._fbDb && window._fbFns && currentUser) {
+        try {
+          const { doc, getDoc } = window._fbFns;
+          const ref = doc(window._fbDb, 'users', currentUser);
+          const snap = await getDoc(ref);
+          if (snap.exists()) {
+            const d = snap.data().spreadsheetData;
+            if (d && d.books && Object.keys(d.books).length > 0) {
+              ssBooks = d.books || {};
+              ssSheetOrder = d.order || [];
+              ssActiveSheet = d.active || '';
+              // LocalStorage bhi update karo
+              try { localStorage.setItem('billpro_ss', JSON.stringify({ books: ssBooks, order: ssSheetOrder, active: ssActiveSheet })); } catch(e) {}
+              return; // Firebase se mil gaya, localStorage ki zaroorat nahi
+            }
+          }
+        } catch(e) {
+          console.warn('Spreadsheet Firebase load error:', e);
+        }
+      }
+      // Firebase nahi mila to localStorage se load karo (fallback)
       try {
         const raw = localStorage.getItem('billpro_ss');
         if (raw) { const d = JSON.parse(raw); ssBooks = d.books||{}; ssSheetOrder = d.order||[]; ssActiveSheet = d.active||''; }
@@ -2573,11 +2616,13 @@
     // Listen for external refresh trigger
     document.addEventListener('ss-refresh', function() { ssRender(); });
 
-    window.initSpreadsheet = function() {
+    window.initSpreadsheet = async function() {
       if (!document.getElementById('ss-grid')) return;
-      ssLoad();
+      if (!ssInited) { const grid = document.getElementById("ss-grid"); if(grid) grid.innerHTML = "<div style=\"padding:32px;text-align:center;color:#888;font-size:14px;\">⏳ Data load ho raha hai...</div>"; }
+      await ssLoad();
       if (ssSheetOrder.length === 0) { ssCreateSheet('Sheet1'); ssCreateSheet('Sheet2'); }
       if (!ssBooks[ssActiveSheet]) ssActiveSheet = ssSheetOrder[0];
+      ssRefreshGlobals();
       ssRender();
       ssInited = true;
     };
