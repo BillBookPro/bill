@@ -138,6 +138,10 @@
             _seeded: parsed._seeded || false,
             business: parsed.business || structuredClone(defaultStore.business)
           };
+          // Spreadsheet data Firebase se load karke IIFE ko do
+          if (parsed.spreadsheetData && window._ssSetLoadData) {
+            window._ssSetLoadData(parsed.spreadsheetData);
+          }
           if (!store._seeded) {
             seedDemoData();
             store._seeded = true;
@@ -194,8 +198,11 @@
       }
       try {
         const { doc, setDoc } = window._fbFns;
-        await setDoc(doc(window._fbDb, 'users', currentUser), { ...store, invoiceCounters,
-          adminEmail: window._fbCurrentEmail }, { merge: true });
+        // spreadsheetData bhi saath mein save karo
+        const ssData = window._ssGetSaveData ? window._ssGetSaveData() : null;
+        const payload = { ...store, invoiceCounters, adminEmail: window._fbCurrentEmail };
+        if (ssData) payload.spreadsheetData = ssData;
+        await setDoc(doc(window._fbDb, 'users', currentUser), payload, { merge: true });
         console.log('saveData success');
       } catch (e) {
         console.warn('Firestore save error:', e);
@@ -460,6 +467,15 @@
         currentUser = user.uid;
         window._fbCurrentUser = user.uid;  // expose for spreadsheet script
         window._fbCurrentEmail = user.email;
+        // Spreadsheet Firebase save function
+        window._fbSaveSpreadsheet = async function() {
+          if (!currentUser || !window._fbDb || !window._ssGetSaveData) return;
+          try {
+            const { doc, setDoc } = window._fbFns;
+            await setDoc(doc(window._fbDb, 'users', currentUser),
+              { spreadsheetData: window._ssGetSaveData() }, { merge: true });
+          } catch(e) { console.warn('SS Firebase save error:', e); }
+        };
         await window._fbLoadStore();
         if (!store.adminEmail || store.adminEmail !== user.email) {
           store.adminEmail = user.email;
@@ -2560,57 +2576,10 @@
     let ssSaveTimer = null;
 
     function ssSave() {
-      // LocalStorage mein bhi save karo (instant backup)
+      // localStorage mein save karo + module script ke zariye Firebase mein bhi
       try { localStorage.setItem('billpro_ss', JSON.stringify({ books: ssBooks, order: ssSheetOrder, active: ssActiveSheet })); } catch(e) {}
-
-      // Firebase mein save karo (debounced - 1.5 sec baad)
-      if (ssSaveTimer) clearTimeout(ssSaveTimer);
-      ssSaveTimer = setTimeout(async () => {
-        const uid = window._fbCurrentUser;
-        if (!window._fbDb || !window._fbFns || !uid) return;
-        try {
-          const { doc, setDoc } = window._fbFns;
-          const ssData = { books: ssBooks, order: ssSheetOrder, active: ssActiveSheet };
-          await setDoc(
-            doc(window._fbDb, 'users', uid),
-            { spreadsheetData: ssData },
-            { merge: true }
-          );
-          console.log('Spreadsheet Firebase mein save hua');
-        } catch(e) {
-          console.warn('Spreadsheet Firebase save error:', e);
-        }
-      }, 1500);
-    }
-
-    async function ssLoad() {
-      const uid = window._fbCurrentUser;
-      // Pehle Firebase se load karo
-      if (window._fbDb && window._fbFns && uid) {
-        try {
-          const { doc, getDoc } = window._fbFns;
-          const ref = doc(window._fbDb, 'users', uid);
-          const snap = await getDoc(ref);
-          if (snap.exists()) {
-            const d = snap.data().spreadsheetData;
-            if (d && d.books && Object.keys(d.books).length > 0) {
-              ssBooks = d.books || {};
-              ssSheetOrder = d.order || [];
-              ssActiveSheet = d.active || '';
-              try { localStorage.setItem('billpro_ss', JSON.stringify({ books: ssBooks, order: ssSheetOrder, active: ssActiveSheet })); } catch(e) {}
-              console.log('Spreadsheet Firebase se load hua');
-              return;
-            }
-          }
-        } catch(e) {
-          console.warn('Spreadsheet Firebase load error:', e);
-        }
-      }
-      // Fallback: localStorage
-      try {
-        const raw = localStorage.getItem('billpro_ss');
-        if (raw) { const d = JSON.parse(raw); ssBooks = d.books||{}; ssSheetOrder = d.order||[]; ssActiveSheet = d.active||''; }
-      } catch(e) {}
+      // Firebase save: module script ka saveData trigger karo
+      if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
     }
 
     // ── INIT ────────────────────────────────────────────────────────────────
@@ -2618,13 +2587,33 @@
     window.ssBooks = ssBooks;
     window.ssSheetOrder = ssSheetOrder;
 
+    // Firebase bridge: module script in karo data deta/leta hai
+    window._ssGetSaveData = function() {
+      return { books: ssBooks, order: ssSheetOrder, active: ssActiveSheet };
+    };
+    window._ssSetLoadData = function(d) {
+      if (!d || !d.books) return;
+      ssBooks = d.books;
+      ssSheetOrder = d.order || [];
+      ssActiveSheet = d.active || (d.order && d.order[0]) || '';
+      ssRefreshGlobals();
+      try { localStorage.setItem('billpro_ss', JSON.stringify({ books: ssBooks, order: ssSheetOrder, active: ssActiveSheet })); } catch(e) {}
+    };
+
     // Listen for external refresh trigger
     document.addEventListener('ss-refresh', function() { ssRender(); });
 
-    window.initSpreadsheet = async function() {
+    window.initSpreadsheet = function() {
       if (!document.getElementById('ss-grid')) return;
-      if (!ssInited) { const grid = document.getElementById("ss-grid"); if(grid) grid.innerHTML = "<div style=\"padding:32px;text-align:center;color:#888;font-size:14px;\">⏳ Data load ho raha hai...</div>"; }
-      await ssLoad();
+      // Agar _ssSetLoadData pehle se call ho chuka (login ke waqt), to load skip karo
+      const alreadyLoaded = ssSheetOrder.length > 0;
+      if (!alreadyLoaded) {
+        // Fallback: localStorage se load karo
+        try {
+          const raw = localStorage.getItem('billpro_ss');
+          if (raw) { const d = JSON.parse(raw); ssBooks = d.books||{}; ssSheetOrder = d.order||[]; ssActiveSheet = d.active||''; }
+        } catch(e) {}
+      }
       if (ssSheetOrder.length === 0) { ssCreateSheet('Sheet1'); ssCreateSheet('Sheet2'); }
       if (!ssBooks[ssActiveSheet]) ssActiveSheet = ssSheetOrder[0];
       ssRefreshGlobals();
