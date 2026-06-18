@@ -5961,6 +5961,9 @@
           if (change.type === 'added') {
             const data = change.doc.data();
             if (data.value) {
+              // scanner.html se sheet/col bhi aa sakta hai
+              if (data.sheet) scanTargetSheet = data.sheet;
+              if (data.col !== undefined) scanTargetCol = parseInt(data.col) || 0;
               receiveScanData(data.value, data.timestamp || new Date().toISOString());
               // Delete doc after receiving (cleanup)
               try {
@@ -5975,16 +5978,29 @@
 
     function receiveScanData(value, timestamp) {
       // Write to spreadsheet
-      if (window.ssBooks && scanTargetSheet && window.ssBooks[scanTargetSheet]) {
+      // Agar sheet set nahi, pehli available sheet use karo
+      if (!scanTargetSheet && window.ssSheetOrder && window.ssSheetOrder.length > 0) {
+        scanTargetSheet = window.ssSheetOrder[0];
+      }
+      if (window.ssBooks && scanTargetSheet) {
+        if (!window.ssBooks[scanTargetSheet]) {
+          window.ssBooks[scanTargetSheet] = { cells: {}, formats: {} };
+        }
         const book = window.ssBooks[scanTargetSheet];
+        // Next empty row find karo us column mein
+        const existingRows = Object.keys(book.cells)
+          .filter(k => parseInt(k.split(',')[1]) === scanTargetCol)
+          .map(k => parseInt(k.split(',')[0]));
+        if (existingRows.length > 0) scanRowPointer = Math.max(...existingRows) + 1;
         const key = scanRowPointer + ',' + scanTargetCol;
         book.cells[key] = String(value);
         if (scanAddTimestamp) {
-          const tsCol = scanTargetCol + 1;
-          book.cells[scanRowPointer + ',' + tsCol] = new Date(timestamp).toLocaleTimeString('en-IN');
+          book.cells[scanRowPointer + ',' + (scanTargetCol + 1)] = new Date(timestamp).toLocaleTimeString('en-IN');
         }
         scanRowPointer++;
+        // Spreadsheet refresh + Firebase save
         if (window.ssRenderExternal) window.ssRenderExternal();
+        if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
         if (typeof showToast === 'function') showToast('success', '📱 Scan aaya: ' + value);
       }
 
