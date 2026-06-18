@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>BillPro Scanner</title>
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.18.6/umd/index.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #f1f5f9; min-height: 100vh; }
+
+    .header { background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 20px; text-align: center; }
+    .header h1 { font-size: 22px; font-weight: 800; }
+    .header p { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+
+    .container { max-width: 480px; margin: 0 auto; padding: 20px; }
+
+    /* STATUS */
+    .status-bar { border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; text-align: center; font-weight: 700; font-size: 14px; transition: all 0.3s; }
+    .status-bar.connected { background: #052e16; border: 1px solid #16a34a; color: #4ade80; }
+    .status-bar.error { background: #450a0a; border: 1px solid #dc2626; color: #f87171; }
+    .status-bar.sending { background: #1e1b4b; border: 1px solid #6366f1; color: #a5b4fc; }
+    .status-bar.success { background: #052e16; border: 1px solid #22c55e; color: #86efac; }
+
+    /* CAMERA */
+    .camera-section { background: #1e293b; border-radius: 16px; overflow: hidden; margin-bottom: 16px; }
+    .camera-wrap { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; }
+    #video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .scan-line { position: absolute; left: 10%; right: 10%; height: 3px; background: linear-gradient(90deg, transparent, #6366f1, #8b5cf6, transparent); border-radius: 2px; animation: scanAnim 2s linear infinite; top: 20%; }
+    @keyframes scanAnim { 0% { top: 20%; } 100% { top: 80%; } }
+    .corner { position: absolute; width: 28px; height: 28px; border-color: #6366f1; border-style: solid; }
+    .corner.tl { top: 12%; left: 10%; border-width: 3px 0 0 3px; }
+    .corner.tr { top: 12%; right: 10%; border-width: 3px 3px 0 0; }
+    .corner.bl { bottom: 12%; left: 10%; border-width: 0 0 3px 3px; }
+    .corner.br { bottom: 12%; right: 10%; border-width: 0 3px 3px 0; }
+    .camera-label { padding: 10px; text-align: center; font-size: 12px; color: #94a3b8; }
+
+    /* BUTTONS */
+    .btn { width: 100%; padding: 14px; border: none; border-radius: 12px; font-size: 16px; font-weight: 700; cursor: pointer; transition: transform 0.15s, opacity 0.15s; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+    .btn:active { transform: scale(0.97); }
+    .btn-camera { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; }
+    .btn-stop { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+    .btn-send { background: linear-gradient(135deg, #059669, #10b981); color: #fff; }
+    .btn-send:disabled { opacity: 0.4; }
+
+    /* MANUAL INPUT */
+    .input-section { background: #1e293b; border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+    .input-section label { font-size: 12px; color: #94a3b8; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 8px; }
+    .input-row { display: flex; gap: 10px; }
+    input[type="text"] { flex: 1; background: #0f172a; border: 2px solid #334155; border-radius: 10px; padding: 12px 14px; font-size: 16px; color: #f1f5f9; outline: none; }
+    input[type="text"]:focus { border-color: #6366f1; }
+    .send-btn { background: #6366f1; color: #fff; border: none; border-radius: 10px; padding: 12px 18px; font-size: 16px; font-weight: 700; cursor: pointer; }
+
+    /* SESSION SETUP */
+    .setup-box { background: #1e293b; border-radius: 16px; padding: 20px; margin-bottom: 16px; }
+    .setup-box h3 { font-size: 15px; font-weight: 800; margin-bottom: 14px; color: #e2e8f0; }
+    .field { margin-bottom: 12px; }
+    .field label { font-size: 12px; color: #94a3b8; display: block; margin-bottom: 5px; font-weight: 700; text-transform: uppercase; }
+    .field input { width: 100%; background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 14px; color: #f1f5f9; outline: none; }
+    .field input:focus { border-color: #6366f1; }
+    .connect-btn { width: 100%; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; border: none; border-radius: 10px; padding: 14px; font-size: 16px; font-weight: 800; cursor: pointer; }
+
+    /* HISTORY */
+    .history-section { background: #1e293b; border-radius: 16px; overflow: hidden; }
+    .history-header { padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
+    .history-header span { font-size: 13px; font-weight: 700; color: #e2e8f0; }
+    .clear-btn { background: none; border: none; color: #64748b; font-size: 12px; cursor: pointer; }
+    .history-list { max-height: 200px; overflow-y: auto; }
+    .history-item { padding: 10px 16px; border-bottom: 1px solid #1e293b; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+    .history-item .val { font-weight: 700; color: #a5b4fc; }
+    .history-item .time { font-size: 11px; color: #475569; }
+    .empty-history { padding: 20px; text-align: center; color: #475569; font-size: 13px; }
+
+    /* SESSION VIEW - shown when connected */
+    #main-scanner { display: none; }
+    #setup-view { display: block; }
+
+    .session-info { background: #1e293b; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; color: #94a3b8; display: flex; justify-content: space-between; align-items: center; }
+    .session-info .sid { color: #a5b4fc; font-weight: 700; font-size: 11px; }
+    .disconnect-btn { background: none; border: none; color: #ef4444; font-size: 12px; cursor: pointer; }
+
+    .count-badge { background: #6366f1; color: #fff; border-radius: 99px; padding: 2px 10px; font-size: 12px; font-weight: 800; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📱 BillPro Scanner</h1>
+  <p>Barcode scan karein — data seedha spreadsheet mein</p>
+</div>
+
+<div class="container">
+
+  <!-- SETUP VIEW -->
+  <div id="setup-view">
+    <div class="setup-box">
+      <h3>🔗 Session Se Connect Karein</h3>
+      <div class="field">
+        <label>Session ID <span style="color:#ef4444">*</span></label>
+        <input type="text" id="session-input" placeholder="billpro-abc123" autocomplete="off" autocapitalize="off">
+      </div>
+      <div class="field">
+        <label>Sheet Ka Naam (optional)</label>
+        <input type="text" id="sheet-input" placeholder="Sheet1">
+      </div>
+      <div class="field">
+        <label>Column (optional, default: A)</label>
+        <input type="text" id="col-input" placeholder="A" maxlength="2" style="width:80px;">
+      </div>
+      <button class="connect-btn" onclick="connectSession()">✅ Connect Karein</button>
+    </div>
+    <p style="text-align:center;font-size:12px;color:#475569;">Ya BillPro mein Spreadsheet → Scan button se QR scan karein</p>
+  </div>
+
+  <!-- MAIN SCANNER VIEW -->
+  <div id="main-scanner">
+
+    <div class="status-bar connected" id="status-bar">🟢 Connected — Scan karo!</div>
+
+    <div class="session-info">
+      <div>Session: <span class="sid" id="session-label">—</span></div>
+      <button class="disconnect-btn" onclick="disconnectSession()">✕ Disconnect</button>
+    </div>
+
+    <!-- CAMERA SCAN -->
+    <div class="camera-section">
+      <div class="camera-wrap" id="camera-wrap" style="display:none;">
+        <video id="video" playsinline></video>
+        <div class="scan-line"></div>
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+      </div>
+      <div class="camera-label" id="camera-label">Camera band hai</div>
+      <div style="padding:0 12px 12px;display:flex;gap:8px;">
+        <button class="btn btn-camera" id="start-btn" onclick="startCamera()" style="margin:0;">📷 Camera Shuru Karo</button>
+        <button class="btn btn-stop" id="stop-btn" onclick="stopCamera()" style="display:none;margin:0;">⏹ Band Karo</button>
+      </div>
+    </div>
+
+    <!-- MANUAL INPUT -->
+    <div class="input-section">
+      <label>✍️ Manual Type Karein</label>
+      <div class="input-row">
+        <input type="text" id="manual-input" placeholder="Product name ya barcode..." onkeydown="if(event.key==='Enter')sendManual()">
+        <button class="send-btn" onclick="sendManual()">📤</button>
+      </div>
+    </div>
+
+    <!-- HISTORY -->
+    <div class="history-section">
+      <div class="history-header">
+        <span>📋 Sent Data <span class="count-badge" id="count-badge">0</span></span>
+        <button class="clear-btn" onclick="clearHistory()">Clear</button>
+      </div>
+      <div class="history-list" id="history-list">
+        <div class="empty-history">Abhi koi scan nahi</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Firebase -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBy8UEKBowJP1Vp4QHO4asjPxmgq_UfODM",
+    authDomain: "bill-book-pro-93155.firebaseapp.com",
+    projectId: "bill-book-pro-93155",
+    storageBucket: "bill-book-pro-93155.firebasestorage.app",
+    messagingSenderId: "409759386921",
+    appId: "1:409759386921:web:886bb07870ab756ba67b38"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  window._scanDb = db;
+  window._scanAddDoc = addDoc;
+  window._scanCollection = collection;
+</script>
+
+<script>
+  let activeSession = '';
+  let activeSheet = 'Sheet1';
+  let activeCol = 0;
+  let sentCount = 0;
+  let codeReader = null;
+  let cameraActive = false;
+
+  // URL se session auto-detect karo
+  window.addEventListener('load', function() {
+    const params = new URLSearchParams(window.location.search);
+    const s = params.get('scan_session');
+    const sh = params.get('sheet');
+    const col = params.get('col');
+    if (s) {
+      document.getElementById('session-input').value = s;
+      if (sh) document.getElementById('sheet-input').value = sh;
+      if (col) document.getElementById('col-input').value = col;
+      connectSession();
+    }
+  });
+
+  function connectSession() {
+    const sid = document.getElementById('session-input').value.trim();
+    if (!sid) { alert('Session ID daalein'); return; }
+    activeSession = sid;
+    const sh = document.getElementById('sheet-input').value.trim();
+    if (sh) activeSheet = sh;
+    const colVal = document.getElementById('col-input').value.trim().toUpperCase();
+    if (colVal && colVal >= 'A' && colVal <= 'Z') {
+      activeCol = colVal.charCodeAt(0) - 65;
+    }
+    document.getElementById('setup-view').style.display = 'none';
+    document.getElementById('main-scanner').style.display = 'block';
+    document.getElementById('session-label').textContent = sid;
+    setStatus('connected', '🟢 Connected! Sheet: ' + activeSheet + ' | Col: ' + String.fromCharCode(65 + activeCol));
+  }
+
+  function disconnectSession() {
+    stopCamera();
+    activeSession = '';
+    document.getElementById('setup-view').style.display = 'block';
+    document.getElementById('main-scanner').style.display = 'none';
+  }
+
+  async function sendValue(value) {
+    if (!value || !activeSession) return;
+    setStatus('sending', '⏳ Bhej raha hun: ' + value);
+    try {
+      // Wait for Firebase to load
+      let attempts = 0;
+      while ((!window._scanDb || !window._scanAddDoc) && attempts < 20) {
+        await new Promise(r => setTimeout(r, 200));
+        attempts++;
+      }
+      if (!window._scanDb) throw new Error('Firebase load nahi hua');
+
+      await window._scanAddDoc(
+        window._scanCollection(window._scanDb, 'scan_sessions'),
+        {
+          session: activeSession,
+          value: value,
+          sheet: activeSheet,
+          col: activeCol,
+          timestamp: new Date().toISOString()
+        }
+      );
+      sentCount++;
+      document.getElementById('count-badge').textContent = sentCount;
+      addHistory(value);
+      setStatus('success', '✅ Bhej diya: ' + value);
+      setTimeout(() => setStatus('connected', '🟢 Connected! Aur scan karo...'), 2000);
+    } catch(e) {
+      setStatus('error', '❌ Error: ' + e.message);
+    }
+  }
+
+  function sendManual() {
+    const input = document.getElementById('manual-input');
+    const val = input.value.trim();
+    if (!val) return;
+    sendValue(val);
+    input.value = '';
+  }
+
+  function startCamera() {
+    if (!window.ZXing) {
+      setStatus('error', '❌ Scanner library load nahi hui');
+      return;
+    }
+    const video = document.getElementById('video');
+    document.getElementById('camera-wrap').style.display = 'block';
+    document.getElementById('start-btn').style.display = 'none';
+    document.getElementById('stop-btn').style.display = '';
+    document.getElementById('camera-label').textContent = '🎯 Barcode ko frame mein rakhein...';
+    cameraActive = true;
+
+    codeReader = new ZXing.BrowserMultiFormatReader();
+    codeReader.decodeFromVideoDevice(null, video, (result, err) => {
+      if (result && cameraActive) {
+        const text = result.getText();
+        // Debounce — same value bar bar na bheje
+        if (window._lastScanned === text && (Date.now() - window._lastScanTime) < 3000) return;
+        window._lastScanned = text;
+        window._lastScanTime = Date.now();
+        sendValue(text);
+        // Flash feedback
+        document.getElementById('camera-wrap').style.border = '3px solid #22c55e';
+        setTimeout(() => document.getElementById('camera-wrap').style.border = '', 500);
+      }
+    });
+  }
+
+  function stopCamera() {
+    cameraActive = false;
+    if (codeReader) { try { codeReader.reset(); } catch(e) {} codeReader = null; }
+    document.getElementById('camera-wrap').style.display = 'none';
+    document.getElementById('start-btn').style.display = '';
+    document.getElementById('stop-btn').style.display = 'none';
+    document.getElementById('camera-label').textContent = 'Camera band hai';
+  }
+
+  function addHistory(value) {
+    const list = document.getElementById('history-list');
+    const empty = list.querySelector('.empty-history');
+    if (empty) empty.remove();
+    const item = document.createElement('div');
+    item.className = 'history-item';
+    const time = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    item.innerHTML = '<span class="val">' + escHtml(value) + '</span><span class="time">' + time + '</span>';
+    list.insertBefore(item, list.firstChild);
+  }
+
+  function clearHistory() {
+    document.getElementById('history-list').innerHTML = '<div class="empty-history">Abhi koi scan nahi</div>';
+    sentCount = 0;
+    document.getElementById('count-badge').textContent = '0';
+  }
+
+  function setStatus(type, msg) {
+    const bar = document.getElementById('status-bar');
+    bar.className = 'status-bar ' + type;
+    bar.textContent = msg;
+  }
+
+  function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+</script>
+
+</body>
+</html>
