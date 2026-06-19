@@ -2,335 +2,541 @@
 <html lang="hi">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title>BillPro Scanner</title>
-  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.18.6/umd/index.min.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Barcode Scanner</title>
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #f1f5f9; min-height: 100vh; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
-    .header { background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 20px; text-align: center; }
-    .header h1 { font-size: 22px; font-weight: 800; }
-    .header p { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1923;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
 
-    .container { max-width: 480px; margin: 0 auto; padding: 20px; }
+    .header {
+      background: linear-gradient(135deg, #1663a6, #0c477c);
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+    }
+    .header-icon { font-size: 24px; }
+    .header h1 { font-size: 17px; font-weight: 800; }
+    .header p  { font-size: 11px; opacity: 0.75; margin-top: 2px; }
 
-    /* STATUS */
-    .status-bar { border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; text-align: center; font-weight: 700; font-size: 14px; transition: all 0.3s; }
-    .status-bar.connected { background: #052e16; border: 1px solid #16a34a; color: #4ade80; }
-    .status-bar.error { background: #450a0a; border: 1px solid #dc2626; color: #f87171; }
-    .status-bar.sending { background: #1e1b4b; border: 1px solid #6366f1; color: #a5b4fc; }
-    .status-bar.success { background: #052e16; border: 1px solid #22c55e; color: #86efac; }
+    /* Camera area */
+    .camera-wrap {
+      position: relative;
+      width: 100%;
+      background: #000;
+      flex-shrink: 0;
+    }
+    #video {
+      width: 100%;
+      display: block;
+      max-height: 55vw;
+      object-fit: cover;
+    }
+    .scan-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    .scan-box {
+      width: 65%;
+      aspect-ratio: 2.5 / 1;
+      border: 3px solid #00ff88;
+      border-radius: 10px;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.42);
+      transition: border-color 0.2s;
+    }
+    .scan-box.found {
+      border-color: #ffcc00;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.42), 0 0 20px #ffcc00;
+    }
+    .scan-hint {
+      position: absolute;
+      bottom: 8px;
+      left: 0; right: 0;
+      text-align: center;
+      font-size: 12px;
+      color: rgba(255,255,255,0.85);
+    }
 
-    /* CAMERA */
-    .camera-section { background: #1e293b; border-radius: 16px; overflow: hidden; margin-bottom: 16px; }
-    .camera-wrap { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; }
-    #video { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .scan-line { position: absolute; left: 10%; right: 10%; height: 3px; background: linear-gradient(90deg, transparent, #6366f1, #8b5cf6, transparent); border-radius: 2px; animation: scanAnim 2s linear infinite; top: 20%; }
-    @keyframes scanAnim { 0% { top: 20%; } 100% { top: 80%; } }
-    .corner { position: absolute; width: 28px; height: 28px; border-color: #6366f1; border-style: solid; }
-    .corner.tl { top: 12%; left: 10%; border-width: 3px 0 0 3px; }
-    .corner.tr { top: 12%; right: 10%; border-width: 3px 3px 0 0; }
-    .corner.bl { bottom: 12%; left: 10%; border-width: 0 0 3px 3px; }
-    .corner.br { bottom: 12%; right: 10%; border-width: 0 3px 3px 0; }
-    .camera-label { padding: 10px; text-align: center; font-size: 12px; color: #94a3b8; }
+    /* Confirm overlay — shown when barcode found */
+    .confirm-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.72);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      z-index: 10;
+    }
+    .confirm-overlay.show { display: flex; }
+    .confirm-code {
+      background: #fff;
+      color: #0c477c;
+      font-size: 20px;
+      font-weight: 900;
+      padding: 12px 22px;
+      border-radius: 12px;
+      text-align: center;
+      word-break: break-all;
+      max-width: 90%;
+    }
+    .confirm-label {
+      font-size: 13px;
+      color: rgba(255,255,255,0.8);
+      margin-top: -6px;
+    }
+    .confirm-btns {
+      display: flex;
+      gap: 12px;
+      margin-top: 4px;
+    }
+    .btn-ok {
+      padding: 14px 32px;
+      background: #00cc66;
+      color: #fff;
+      border: none;
+      border-radius: 50px;
+      font-size: 18px;
+      font-weight: 900;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,204,102,0.5);
+      letter-spacing: 1px;
+    }
+    .btn-ok:active { opacity: 0.85; transform: scale(0.97); }
+    .btn-retry {
+      padding: 14px 22px;
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-radius: 50px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-retry:active { opacity: 0.8; }
 
-    /* BUTTONS */
-    .btn { width: 100%; padding: 14px; border: none; border-radius: 12px; font-size: 16px; font-weight: 700; cursor: pointer; transition: transform 0.15s, opacity 0.15s; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 10px; }
-    .btn:active { transform: scale(0.97); }
-    .btn-camera { background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; }
-    .btn-stop { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
-    .btn-send { background: linear-gradient(135deg, #059669, #10b981); color: #fff; }
-    .btn-send:disabled { opacity: 0.4; }
+    /* Bottom panel */
+    .panel {
+      flex: 1;
+      background: #fff;
+      border-radius: 22px 22px 0 0;
+      padding: 18px 16px 30px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: -10px;
+      position: relative;
+      z-index: 2;
+    }
 
-    /* MANUAL INPUT */
-    .input-section { background: #1e293b; border-radius: 16px; padding: 16px; margin-bottom: 16px; }
-    .input-section label { font-size: 12px; color: #94a3b8; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 8px; }
-    .input-row { display: flex; gap: 10px; }
-    input[type="text"] { flex: 1; background: #0f172a; border: 2px solid #334155; border-radius: 10px; padding: 12px 14px; font-size: 16px; color: #f1f5f9; outline: none; }
-    input[type="text"]:focus { border-color: #6366f1; }
-    .send-btn { background: #6366f1; color: #fff; border: none; border-radius: 10px; padding: 12px 18px; font-size: 16px; font-weight: 700; cursor: pointer; }
+    .btn-camera {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #16a663, #0c7c47);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-camera:active { opacity: 0.85; }
+    .btn-camera.off { background: linear-gradient(135deg, #e53e3e, #c53030); }
 
-    /* SESSION SETUP */
-    .setup-box { background: #1e293b; border-radius: 16px; padding: 20px; margin-bottom: 16px; }
-    .setup-box h3 { font-size: 15px; font-weight: 800; margin-bottom: 14px; color: #e2e8f0; }
-    .field { margin-bottom: 12px; }
-    .field label { font-size: 12px; color: #94a3b8; display: block; margin-bottom: 5px; font-weight: 700; text-transform: uppercase; }
-    .field input { width: 100%; background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 14px; color: #f1f5f9; outline: none; }
-    .field input:focus { border-color: #6366f1; }
-    .connect-btn { width: 100%; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; border: none; border-radius: 10px; padding: 14px; font-size: 16px; font-weight: 800; cursor: pointer; }
+    .status-pill {
+      display: none;
+      text-align: center;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .status-pill.success { background: #d4edda; color: #155724; }
+    .status-pill.error   { background: #f8d7da; color: #721c24; }
+    .status-pill.warn    { background: #fff3cd; color: #856404; }
+    .status-pill.sending { background: #cce5ff; color: #004085; }
 
-    /* HISTORY */
-    .history-section { background: #1e293b; border-radius: 16px; overflow: hidden; }
-    .history-header { padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
-    .history-header span { font-size: 13px; font-weight: 700; color: #e2e8f0; }
-    .clear-btn { background: none; border: none; color: #64748b; font-size: 12px; cursor: pointer; }
-    .history-list { max-height: 200px; overflow-y: auto; }
-    .history-item { padding: 10px 16px; border-bottom: 1px solid #1e293b; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
-    .history-item .val { font-weight: 700; color: #a5b4fc; }
-    .history-item .time { font-size: 11px; color: #475569; }
-    .empty-history { padding: 20px; text-align: center; color: #475569; font-size: 13px; }
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #aaa;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #e0e0e0;
+    }
 
-    /* SESSION VIEW - shown when connected */
-    #main-scanner { display: none; }
-    #setup-view { display: block; }
+    label.field-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      display: block;
+      margin-bottom: 6px;
+    }
 
-    .session-info { background: #1e293b; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; color: #94a3b8; display: flex; justify-content: space-between; align-items: center; }
-    .session-info .sid { color: #a5b4fc; font-weight: 700; font-size: 11px; }
-    .disconnect-btn { background: none; border: none; color: #ef4444; font-size: 12px; cursor: pointer; }
+    input[type="text"], input[type="number"] {
+      width: 100%;
+      border: 2px solid #1663a6;
+      border-radius: 10px;
+      padding: 11px 14px;
+      font-size: 16px;
+      font-weight: 600;
+      outline: none;
+      color: #222;
+      background: #f7f9fb;
+    }
+    input[type="number"] { border-color: #ddd; }
 
-    .count-badge { background: #6366f1; color: #fff; border-radius: 99px; padding: 2px 10px; font-size: 12px; font-weight: 800; }
+    .btn-send {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #1663a6, #0c477c);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 800;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-send:active  { opacity: 0.85; }
+    .btn-send:disabled { opacity: 0.5; }
+
+    .log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .log-header span { font-size: 11px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+    .log-header button { font-size: 12px; color: #aaa; background: none; border: none; cursor: pointer; }
+    #log-list {
+      max-height: 180px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .log-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: #f7f9fb;
+      border-radius: 8px;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; } }
+    .log-barcode { font-size: 14px; font-weight: 700; color: #222; }
+    .log-meta    { font-size: 11px; color: #888; }
+    .log-empty   { font-size: 13px; color: #bbb; text-align: center; padding: 14px 0; }
+
+    canvas { display: none; }
   </style>
 </head>
 <body>
 
-<div class="header">
-  <h1>📱 BillPro Scanner</h1>
-  <p>Barcode scan karein — data seedha spreadsheet mein</p>
-</div>
-
-<div class="container">
-
-  <!-- SETUP VIEW -->
-  <div id="setup-view">
-    <div class="setup-box">
-      <h3>🔗 Session Se Connect Karein</h3>
-      <div class="field">
-        <label>Session ID <span style="color:#ef4444">*</span></label>
-        <input type="text" id="session-input" placeholder="billpro-abc123" autocomplete="off" autocapitalize="off">
-      </div>
-      <div class="field">
-        <label>Sheet Ka Naam (optional)</label>
-        <input type="text" id="sheet-input" placeholder="Sheet1">
-      </div>
-      <div class="field">
-        <label>Column (optional, default: A)</label>
-        <input type="text" id="col-input" placeholder="A" maxlength="2" style="width:80px;">
-      </div>
-      <button class="connect-btn" onclick="connectSession()">✅ Connect Karein</button>
+  <div class="header">
+    <div class="header-icon">📦</div>
+    <div>
+      <h1>Barcode Scanner</h1>
+      <p>Scan karo → OK dabao → Sheet mein jayega</p>
     </div>
-    <p style="text-align:center;font-size:12px;color:#475569;">Ya BillPro mein Spreadsheet → Scan button se QR scan karein</p>
   </div>
 
-  <!-- MAIN SCANNER VIEW -->
-  <div id="main-scanner">
+  <!-- Camera area -->
+  <div class="camera-wrap" id="camera-wrap" style="display:none;">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="canvas"></canvas>
 
-    <div class="status-bar connected" id="status-bar">🟢 Connected — Scan karo!</div>
-
-    <div class="session-info">
-      <div>Session: <span class="sid" id="session-label">—</span></div>
-      <button class="disconnect-btn" onclick="disconnectSession()">✕ Disconnect</button>
+    <!-- Green scan box -->
+    <div class="scan-overlay">
+      <div class="scan-box" id="scan-box"></div>
     </div>
+    <div class="scan-hint" id="scan-hint">📷 Barcode ko green box mein rakhein</div>
 
-    <!-- CAMERA SCAN -->
-    <div class="camera-section">
-      <div class="camera-wrap" id="camera-wrap" style="display:none;">
-        <video id="video" playsinline></video>
-        <div class="scan-line"></div>
-        <div class="corner tl"></div>
-        <div class="corner tr"></div>
-        <div class="corner bl"></div>
-        <div class="corner br"></div>
-      </div>
-      <div class="camera-label" id="camera-label">Camera band hai</div>
-      <div style="padding:0 12px 12px;display:flex;gap:8px;">
-        <button class="btn btn-camera" id="start-btn" onclick="startCamera()" style="margin:0;">📷 Camera Shuru Karo</button>
-        <button class="btn btn-stop" id="stop-btn" onclick="stopCamera()" style="display:none;margin:0;">⏹ Band Karo</button>
+    <!-- Confirm overlay (appears after scan) -->
+    <div class="confirm-overlay" id="confirm-overlay">
+      <div class="confirm-label">✅ Barcode mila!</div>
+      <div class="confirm-code" id="confirm-code">—</div>
+      <div class="confirm-btns">
+        <button class="btn-ok" onclick="confirmAndSend()">✔ OK</button>
+        <button class="btn-retry" onclick="retryCamera()">↩ Dobara</button>
       </div>
     </div>
+  </div>
 
-    <!-- MANUAL INPUT -->
-    <div class="input-section">
-      <label>✍️ Manual Type Karein</label>
-      <div class="input-row">
-        <input type="text" id="manual-input" placeholder="Product name ya barcode..." onkeydown="if(event.key==='Enter')sendManual()">
-        <button class="send-btn" onclick="sendManual()">📤</button>
-      </div>
+  <!-- Bottom panel -->
+  <div class="panel">
+
+    <button class="btn-camera" id="camera-btn" onclick="toggleCamera()">
+      📷 Camera Kholo aur Scan Karo
+    </button>
+
+    <div class="status-pill" id="status-pill"></div>
+
+    <div class="divider">YA MANUALLY TYPE KARO</div>
+
+    <div>
+      <label class="field-label">Barcode</label>
+      <input type="text" id="barcode-input" placeholder="Yahan type ya scan karo..."
+        onkeydown="if(event.key==='Enter') sendManual()">
     </div>
 
-    <!-- HISTORY -->
-    <div class="history-section">
-      <div class="history-header">
-        <span>📋 Sent Data <span class="count-badge" id="count-badge">0</span></span>
-        <button class="clear-btn" onclick="clearHistory()">Clear</button>
+    <div>
+      <label class="field-label">Quantity</label>
+      <input type="number" id="qty-input" value="1" min="1">
+    </div>
+
+    <button class="btn-send" id="send-btn" onclick="sendManual()">
+      📤 Google Sheet mein Send Karo
+    </button>
+
+    <div>
+      <div class="log-header">
+        <span>Recent Scans</span>
+        <button onclick="clearLog()">Clear</button>
       </div>
-      <div class="history-list" id="history-list">
-        <div class="empty-history">Abhi koi scan nahi</div>
+      <div id="log-list">
+        <p class="log-empty">Abhi koi scan nahi hua</p>
       </div>
     </div>
 
   </div>
-</div>
 
-<!-- Firebase -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  <script>
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzpwcg2U04A9yw2FnU8RJEwTevslXAHcbKaGBVMk6u-lUhIm3Lv4hJ-oY5dUQwF9XWc/exec';
 
-  const firebaseConfig = {
-    apiKey: "AIzaSyBy8UEKBowJP1Vp4QHO4asjPxmgq_UfODM",
-    authDomain: "bill-book-pro-93155.firebaseapp.com",
-    projectId: "bill-book-pro-93155",
-    storageBucket: "bill-book-pro-93155.firebasestorage.app",
-    messagingSenderId: "409759386921",
-    appId: "1:409759386921:web:886bb07870ab756ba67b38"
-  };
+    let stream      = null;
+    let scanning    = false;   // true = actively reading frames
+    let waitingOK   = false;   // true = barcode found, waiting for user OK
+    let pendingCode = '';
+    const logEntries = [];
 
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
+    // ── Camera Toggle ──────────────────────────────────
+    async function toggleCamera() {
+      if (stream) { stopCamera(); return; }
 
-  window._scanDb = db;
-  window._scanAddDoc = addDoc;
-  window._scanCollection = collection;
-</script>
+      const btn = document.getElementById('camera-btn');
+      btn.textContent = '⏳ Camera shuru ho raha hai...';
+      btn.disabled = true;
 
-<script>
-  let activeSession = '';
-  let activeSheet = 'Sheet1';
-  let activeCol = 0;
-  let sentCount = 0;
-  let codeReader = null;
-  let cameraActive = false;
-
-  // URL se session auto-detect karo
-  window.addEventListener('load', function() {
-    const params = new URLSearchParams(window.location.search);
-    const s = params.get('scan_session');
-    const sh = params.get('sheet');
-    const col = params.get('col');
-    if (s) {
-      document.getElementById('session-input').value = s;
-      if (sh) document.getElementById('sheet-input').value = sh;
-      if (col) document.getElementById('col-input').value = col;
-      connectSession();
-    }
-  });
-
-  function connectSession() {
-    const sid = document.getElementById('session-input').value.trim();
-    if (!sid) { alert('Session ID daalein'); return; }
-    activeSession = sid;
-    const sh = document.getElementById('sheet-input').value.trim();
-    if (sh) activeSheet = sh;
-    const colVal = document.getElementById('col-input').value.trim().toUpperCase();
-    if (colVal && colVal >= 'A' && colVal <= 'Z') {
-      activeCol = colVal.charCodeAt(0) - 65;
-    }
-    document.getElementById('setup-view').style.display = 'none';
-    document.getElementById('main-scanner').style.display = 'block';
-    document.getElementById('session-label').textContent = sid;
-    setStatus('connected', '🟢 Connected! Sheet: ' + activeSheet + ' | Col: ' + String.fromCharCode(65 + activeCol));
-  }
-
-  function disconnectSession() {
-    stopCamera();
-    activeSession = '';
-    document.getElementById('setup-view').style.display = 'block';
-    document.getElementById('main-scanner').style.display = 'none';
-  }
-
-  async function sendValue(value) {
-    if (!value || !activeSession) return;
-    setStatus('sending', '⏳ Bhej raha hun: ' + value);
-    try {
-      // Wait for Firebase to load
-      let attempts = 0;
-      while ((!window._scanDb || !window._scanAddDoc) && attempts < 20) {
-        await new Promise(r => setTimeout(r, 200));
-        attempts++;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }
+        });
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+        await video.play();
+        document.getElementById('camera-wrap').style.display = 'block';
+        btn.textContent = '🛑 Camera Band Karo';
+        btn.classList.add('off');
+        btn.disabled = false;
+        startScanning();
+      } catch (err) {
+        showStatus('error', '❌ Camera nahi khula: ' + err.message);
+        btn.textContent = '📷 Camera Kholo aur Scan Karo';
+        btn.disabled = false;
       }
-      if (!window._scanDb) throw new Error('Firebase load nahi hua');
-
-      await window._scanAddDoc(
-        window._scanCollection(window._scanDb, 'scan_sessions'),
-        {
-          session: activeSession,
-          value: value,
-          sheet: activeSheet,
-          col: activeCol,
-          timestamp: new Date().toISOString()
-        }
-      );
-      sentCount++;
-      document.getElementById('count-badge').textContent = sentCount;
-      addHistory(value);
-      setStatus('success', '✅ Bhej diya: ' + value);
-      setTimeout(() => setStatus('connected', '🟢 Connected! Aur scan karo...'), 2000);
-    } catch(e) {
-      setStatus('error', '❌ Error: ' + e.message);
     }
-  }
 
-  function sendManual() {
-    const input = document.getElementById('manual-input');
-    const val = input.value.trim();
-    if (!val) return;
-    sendValue(val);
-    input.value = '';
-  }
-
-  function startCamera() {
-    if (!window.ZXing) {
-      setStatus('error', '❌ Scanner library load nahi hui');
-      return;
+    function stopCamera() {
+      scanning  = false;
+      waitingOK = false;
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      document.getElementById('video').srcObject = null;
+      document.getElementById('camera-wrap').style.display = 'none';
+      document.getElementById('confirm-overlay').classList.remove('show');
+      document.getElementById('scan-box').classList.remove('found');
+      const btn = document.getElementById('camera-btn');
+      btn.textContent = '📷 Camera Kholo aur Scan Karo';
+      btn.classList.remove('off');
+      btn.disabled = false;
     }
-    const video = document.getElementById('video');
-    document.getElementById('camera-wrap').style.display = 'block';
-    document.getElementById('start-btn').style.display = 'none';
-    document.getElementById('stop-btn').style.display = '';
-    document.getElementById('camera-label').textContent = '🎯 Barcode ko frame mein rakhein...';
-    cameraActive = true;
 
-    codeReader = new ZXing.BrowserMultiFormatReader();
-    codeReader.decodeFromVideoDevice(null, video, (result, err) => {
-      if (result && cameraActive) {
-        const text = result.getText();
-        // Debounce — same value bar bar na bheje
-        if (window._lastScanned === text && (Date.now() - window._lastScanTime) < 3000) return;
-        window._lastScanned = text;
-        window._lastScanTime = Date.now();
-        sendValue(text);
-        // Flash feedback
-        document.getElementById('camera-wrap').style.border = '3px solid #22c55e';
-        setTimeout(() => document.getElementById('camera-wrap').style.border = '', 500);
+    function startScanning() {
+      scanning  = true;
+      waitingOK = false;
+      pendingCode = '';
+      document.getElementById('confirm-overlay').classList.remove('show');
+      document.getElementById('scan-box').classList.remove('found');
+      document.getElementById('scan-hint').style.display = 'block';
+      scanFrame();
+    }
+
+    // ── Frame-by-frame barcode read ────────────────────
+    function scanFrame() {
+      if (!scanning || waitingOK || !stream) return;
+
+      const video  = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      if (video.readyState < 2) { requestAnimationFrame(scanFrame); return; }
+
+      canvas.width  = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+
+      try {
+        const ZXing  = window.ZXing;
+        const reader = new ZXing.BrowserMultiFormatReader();
+        const lum    = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+        const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+        try {
+          const result = reader.decodeBitmap(bitmap);
+          if (result && result.getText()) {
+            const code = result.getText();
+            onBarcodeFound(code);
+            return; // stop loop — wait for OK
+          }
+        } catch(e) { /* no barcode yet */ }
+      } catch(e) {}
+
+      requestAnimationFrame(scanFrame);
+    }
+
+    // ── Barcode detected — pause & show confirm ────────
+    function onBarcodeFound(code) {
+      waitingOK   = true;
+      pendingCode = code;
+
+      if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
+
+      document.getElementById('scan-box').classList.add('found');
+      document.getElementById('scan-hint').style.display = 'none';
+      document.getElementById('confirm-code').textContent = code;
+      document.getElementById('confirm-overlay').classList.add('show');
+
+      // Also fill manual input so user can see/edit
+      document.getElementById('barcode-input').value = code;
+    }
+
+    // ── User pressed OK ────────────────────────────────
+    async function confirmAndSend() {
+      const code = pendingCode;
+      const qty  = parseInt(document.getElementById('qty-input').value) || 1;
+      if (!code) return;
+
+      // Hide confirm overlay
+      document.getElementById('confirm-overlay').classList.remove('show');
+      showStatus('sending', '⏳ Sheet mein bhej raha hai...');
+
+      await doSend(code, qty);
+
+      // Resume camera for next scan
+      startScanning();
+    }
+
+    // ── User pressed Retry ─────────────────────────────
+    function retryCamera() {
+      document.getElementById('barcode-input').value = '';
+      startScanning();
+    }
+
+    // ── Manual send (type + button) ────────────────────
+    async function sendManual() {
+      const code = document.getElementById('barcode-input').value.trim();
+      const qty  = parseInt(document.getElementById('qty-input').value) || 1;
+      if (!code) { showStatus('warn', '⚠️ Pehle barcode type karo!'); return; }
+
+      const btn = document.getElementById('send-btn');
+      btn.disabled = true;
+      showStatus('sending', '⏳ Bhej raha hai...');
+      await doSend(code, qty);
+      document.getElementById('barcode-input').value = '';
+      document.getElementById('qty-input').value = 1;
+      btn.disabled = false;
+    }
+
+    // ── Core send function ─────────────────────────────
+    async function doSend(barcode, qty) {
+      const datetime = new Date().toLocaleString('en-IN', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+      });
+      try {
+        await fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ barcode, datetime, quantity: qty })
+        });
+        showStatus('success', '✅ Bheja: ' + barcode + '  (Qty: ' + qty + ')');
+        addLog(barcode, qty);
+      } catch (err) {
+        showStatus('error', '❌ Error: ' + err.message);
       }
-    });
-  }
+    }
 
-  function stopCamera() {
-    cameraActive = false;
-    if (codeReader) { try { codeReader.reset(); } catch(e) {} codeReader = null; }
-    document.getElementById('camera-wrap').style.display = 'none';
-    document.getElementById('start-btn').style.display = '';
-    document.getElementById('stop-btn').style.display = 'none';
-    document.getElementById('camera-label').textContent = 'Camera band hai';
-  }
+    // ── Status ─────────────────────────────────────────
+    let stTimer = null;
+    function showStatus(type, msg) {
+      const pill = document.getElementById('status-pill');
+      pill.className = 'status-pill ' + type;
+      pill.textContent = msg;
+      pill.style.display = 'block';
+      clearTimeout(stTimer);
+      if (type !== 'sending') {
+        stTimer = setTimeout(() => { pill.style.display = 'none'; }, 3500);
+      }
+    }
 
-  function addHistory(value) {
-    const list = document.getElementById('history-list');
-    const empty = list.querySelector('.empty-history');
-    if (empty) empty.remove();
-    const item = document.createElement('div');
-    item.className = 'history-item';
-    const time = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    item.innerHTML = '<span class="val">' + escHtml(value) + '</span><span class="time">' + time + '</span>';
-    list.insertBefore(item, list.firstChild);
-  }
-
-  function clearHistory() {
-    document.getElementById('history-list').innerHTML = '<div class="empty-history">Abhi koi scan nahi</div>';
-    sentCount = 0;
-    document.getElementById('count-badge').textContent = '0';
-  }
-
-  function setStatus(type, msg) {
-    const bar = document.getElementById('status-bar');
-    bar.className = 'status-bar ' + type;
-    bar.textContent = msg;
-  }
-
-  function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-</script>
+    // ── Log ────────────────────────────────────────────
+    function addLog(barcode, qty) {
+      logEntries.unshift({ barcode, qty });
+      if (logEntries.length > 30) logEntries.pop();
+      renderLog();
+    }
+    function clearLog() {
+      logEntries.length = 0;
+      renderLog();
+    }
+    function renderLog() {
+      const el = document.getElementById('log-list');
+      if (!logEntries.length) {
+        el.innerHTML = '<p class="log-empty">Abhi koi scan nahi hua</p>';
+        return;
+      }
+      el.innerHTML = logEntries.map(e =>
+        `<div class="log-item">
+          <span class="log-barcode">${esc(e.barcode)}</span>
+          <span class="log-meta">Qty: ${e.qty}</span>
+        </div>`
+      ).join('');
+    }
+    function esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+  </script>
 
 </body>
 </html>
