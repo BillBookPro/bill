@@ -7,8 +7,8 @@
   <title>BillPro</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js">
-  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
 
   <script type="module">
     // ─── FIREBASE IMPORTS ────────────────────────────────────────────────────────
@@ -365,7 +365,9 @@
     }
 
     // ─── EMPLOYEE MANAGEMENT ──────────────────────────────────────────────────
-    const employeesCollection = collection(db, 'employeeCredentials');
+    function getEmployeesCollection() {
+      return collection(db, 'employeeCredentials');
+    }
 
     async function saveEmployeePassword() {
       const username = document.getElementById('emp-setup-username').value.trim();
@@ -384,7 +386,7 @@
       store.employees.push({ username, passwordHash, status: 'active' });
 
       try {
-        await addDoc(employeesCollection, {
+        await addDoc(getEmployeesCollection(), {
           adminUid: currentUser,
           username: username,
           passwordHash: passwordHash,
@@ -414,11 +416,11 @@
 
       store.employees.splice(idx, 1);
       try {
-        const q = query(employeesCollection, where('adminUid', '==', currentUser), where('username', '==', emp.username));
+        const q = query(getEmployeesCollection(), where('adminUid', '==', currentUser), where('username', '==', emp.username));
         const snap = await getDocs(q);
-        snap.forEach(async (docSnap) => {
+        for (const docSnap of snap.docs) {
           await deleteDoc(docSnap.ref);
-        });
+        }
       } catch (e) {
         console.warn('Failed to delete employee credential doc:', e);
       }
@@ -440,7 +442,7 @@
 
       try {
         const hash = await hashPassword(pass);
-        const q = query(employeesCollection, where('username', '==', username));
+        const q = query(getEmployeesCollection(), where('username', '==', username));
         const snap = await getDocs(q);
         if (snap.empty) {
           alert('Employee username not found.');
@@ -614,13 +616,13 @@
       el.classList.add('active');
       const titles = { dashboard: 'Dashboard', sales: 'Sale Invoices', purchase: 'Purchase Bills',
         customers: 'Customers', products: 'Products', vendors: 'Vendors', employees: 'Employees',
-        returns: 'Returns Management', spreadsheet: 'Spreadsheet' };
+        returns: 'Returns Management', spreadreport: '📊 Spreadsheet Report' };
       const subtitles = { dashboard: 'Business ka quick snapshot', sales: 'Customer invoices manage karein',
         purchase: 'Vendor bills track karein', customers: 'Customer directory',
         products: 'Product master aur rate list', vendors: 'Vendor directory',
         employees: 'Manage and monitor employees',
         returns: 'Meesho, Amazon, Flipkart, Myntra, Flex return pipeline',
-        spreadsheet: 'Excel jaisi spreadsheet — formulas, formatting, offline kaam kare' };
+        spreadreport: 'Sales, Purchase aur Returns ka full report — date filter ke saath' };
       document.getElementById('page-title').textContent = titles[id] || id;
       document.getElementById('page-subtitle').textContent = subtitles[id] || '';
       if (id === 'dashboard') renderDashboard();
@@ -631,7 +633,603 @@
       if (id === 'vendors') renderParties('vendors');
       if (id === 'employees') renderEmployees();
       if (id === 'returns') renderReturns();
-      if (id === 'spreadsheet') initSpreadsheet();
+      if (id === 'spreadreport') { ssCurrentTab = ssCurrentTab || 'sales'; ssRender(); }
+    }
+
+    // ─── SPREADSHEET REPORT ──────────────────────────────────────────────────
+    let ssCurrentTab = 'sales';
+    let ssOnlineRows = 80;
+    let ssOnlineCols = 26;
+    let ssOnlineActive = { row: 0, col: 0 };
+    let ssOnlineState = {
+      order: ['Online Sheet'],
+      activeSheet: 'Online Sheet',
+      sheets: { 'Online Sheet': { cells: {}, formats: {} } }
+    };
+
+    window.ssBooks = ssOnlineState.sheets;
+    window.ssSheetOrder = ssOnlineState.order;
+
+    function ssColumnName(index) {
+      let name = '';
+      let n = index + 1;
+      while (n > 0) {
+        const rem = (n - 1) % 26;
+        name = String.fromCharCode(65 + rem) + name;
+        n = Math.floor((n - 1) / 26);
+      }
+      return name;
+    }
+
+    function ssOnlineBook() {
+      const sheetName = ssOnlineState.activeSheet || 'Online Sheet';
+      if (!ssOnlineState.sheets[sheetName]) ssOnlineState.sheets[sheetName] = { cells: {}, formats: {} };
+      if (!ssOnlineState.sheets[sheetName].formats) ssOnlineState.sheets[sheetName].formats = {};
+      if (!ssOnlineState.sheets[sheetName].formats.colWidths) ssOnlineState.sheets[sheetName].formats.colWidths = {};
+      if (!ssOnlineState.sheets[sheetName].formats.rowHeights) ssOnlineState.sheets[sheetName].formats.rowHeights = {};
+      window.ssBooks = ssOnlineState.sheets;
+      window.ssSheetOrder = ssOnlineState.order;
+      return ssOnlineState.sheets[sheetName];
+    }
+
+    function ssOnlineColWidth(col) {
+      return Math.max(64, Math.min(420, parseInt(ssOnlineBook().formats.colWidths[col], 10) || 118));
+    }
+
+    function ssOnlineRowHeight(row) {
+      return Math.max(28, Math.min(180, parseInt(ssOnlineBook().formats.rowHeights[row], 10) || 30));
+    }
+
+    function ssOnlineCellValue(row, col) {
+      return ssOnlineBook().cells[row + ',' + col] || '';
+    }
+
+    function ssSetOnlineCell(row, col, value) {
+      const book = ssOnlineBook();
+      const key = row + ',' + col;
+      if (value === '') delete book.cells[key];
+      else book.cells[key] = value;
+    }
+
+    window._ssGetSaveData = function() {
+      return ssOnlineState;
+    };
+
+    window._ssSetLoadData = function(data) {
+      if (!data || typeof data !== 'object') return;
+      const sheets = data.sheets && typeof data.sheets === 'object' ? data.sheets : data;
+      const order = Array.isArray(data.order) && data.order.length ? data.order : Object.keys(sheets);
+      ssOnlineState = {
+        order: order.length ? order : ['Online Sheet'],
+        activeSheet: data.activeSheet || order[0] || 'Online Sheet',
+        sheets
+      };
+      if (!ssOnlineState.sheets[ssOnlineState.activeSheet]) {
+        ssOnlineState.sheets[ssOnlineState.activeSheet] = { cells: {}, formats: {} };
+      }
+      window.ssBooks = ssOnlineState.sheets;
+      window.ssSheetOrder = ssOnlineState.order;
+      document.dispatchEvent(new CustomEvent('ss-refresh'));
+    };
+
+    function ssShowTab(tab) {
+      ssCurrentTab = tab;
+      ['sales','purchase','returns','summary','online'].forEach(t => {
+        const btn = document.getElementById('ss-tab-' + t);
+        if (!btn) return;
+        if (t === tab) {
+          btn.style.background = '#1a73e8';
+          btn.style.color = '#fff';
+          btn.style.borderColor = '#1a73e8';
+        } else {
+          btn.style.background = '';
+          btn.style.color = '';
+          btn.style.borderColor = '';
+        }
+      });
+      ssRender();
+    }
+
+    document.addEventListener('ss-refresh', () => {
+      if (ssCurrentTab === 'online') ssRenderOnlineSheet();
+    });
+
+    function ssRenderOnlineSheet() {
+      const container = document.getElementById('ss-table-container');
+      const cardsEl = document.getElementById('ss-summary-cards');
+      if (!container) return;
+
+      // Hide date filter & export toolbar items (not relevant for Google Sheet)
+      cardsEl.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#e8f0fe;border:1px solid #c5d5f8;border-radius:8px;width:100%;">
+          <i class="ti ti-brand-google" style="color:#1a73e8;font-size:18px;"></i>
+          <span style="font-size:13px;color:#174ea6;font-weight:600;">Google Sheet — saare formulas live kaam karenge. Sheet mein changes seedha save honge.</span>
+          <a href="https://docs.google.com/spreadsheets/d/1WVKiUnIKsXYfinFa9JFALUie7PYoiVnT9CB0p-RlYMU/edit" target="_blank" class="btn sm" style="margin-left:auto;background:#1a73e8;color:#fff;border-color:#1a73e8;text-decoration:none;">
+            <i class="ti ti-external-link"></i> Full Screen
+          </a>
+        </div>`;
+
+      container.innerHTML = `
+        <div style="width:100%;height:75vh;border-radius:8px;overflow:hidden;border:1px solid var(--line);">
+          <iframe
+            src="https://docs.google.com/spreadsheets/d/1WVKiUnIKsXYfinFa9JFALUie7PYoiVnT9CB0p-RlYMU/edit?usp=sharing&rm=minimal&embedded=true"
+            style="width:100%;height:100%;border:none;"
+            allowfullscreen>
+          </iframe>
+        </div>`;
+    }
+
+    function ssSetOnlineActive(row, col, value) {
+      ssOnlineActive = { row, col };
+      const label = document.getElementById('online-active-cell');
+      const formula = document.getElementById('online-formula-input');
+      if (label) label.textContent = ssColumnName(col) + (row + 1);
+      if (formula) formula.value = value ?? ssOnlineCellValue(row, col);
+    }
+
+    function ssEditOnlineCell(input) {
+      const row = parseInt(input.dataset.row, 10);
+      const col = parseInt(input.dataset.col, 10);
+      ssOnlineActive = { row, col };
+      ssSetOnlineCell(row, col, input.value);
+      const formula = document.getElementById('online-formula-input');
+      if (formula) formula.value = input.value;
+      if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
+    }
+
+    function ssUpdateActiveCell(value) {
+      ssSetOnlineCell(ssOnlineActive.row, ssOnlineActive.col, value);
+      const selector = `.online-sheet-grid input[data-row="${ssOnlineActive.row}"][data-col="${ssOnlineActive.col}"]`;
+      const input = document.querySelector(selector);
+      if (input) input.value = value;
+      if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
+    }
+
+    function ssPasteOnlineCells(event, input) {
+      const text = event.clipboardData?.getData('text') || '';
+      if (!text.includes('\t') && !text.includes('\n')) {
+        setTimeout(() => ssEditOnlineCell(input), 0);
+        return;
+      }
+      event.preventDefault();
+      const startRow = parseInt(input.dataset.row, 10);
+      const startCol = parseInt(input.dataset.col, 10);
+      const rows = text.replace(/\r/g, '').replace(/\n$/, '').split('\n').map(row => row.split('\t'));
+      ssOnlineRows = Math.max(ssOnlineRows, startRow + rows.length + 5);
+      ssOnlineCols = Math.max(ssOnlineCols, startCol + Math.max(...rows.map(row => row.length)) + 3);
+      rows.forEach((row, r) => {
+        row.forEach((value, c) => ssSetOnlineCell(startRow + r, startCol + c, value));
+      });
+      ssOnlineActive = { row: startRow, col: startCol };
+      ssRenderOnlineSheet();
+      if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
+    }
+
+    function ssAddOnlineRow() {
+      ssOnlineRows += 20;
+      ssRenderOnlineSheet();
+    }
+
+    function ssAddOnlineColumn() {
+      ssOnlineCols += 5;
+      ssRenderOnlineSheet();
+    }
+
+    function ssSetOnlineColumnWidth(col, width) {
+      ssOnlineBook().formats.colWidths[col] = Math.max(64, Math.min(420, Math.round(width)));
+    }
+
+    function ssSetOnlineRowHeight(row, height) {
+      ssOnlineBook().formats.rowHeights[row] = Math.max(28, Math.min(180, Math.round(height)));
+    }
+
+    function ssAdjustOnlineColumn(delta) {
+      ssSetOnlineColumnWidth(ssOnlineActive.col, ssOnlineColWidth(ssOnlineActive.col) + delta);
+      ssRenderOnlineSheet();
+      if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
+    }
+
+    function ssAdjustOnlineRow(delta) {
+      ssSetOnlineRowHeight(ssOnlineActive.row, ssOnlineRowHeight(ssOnlineActive.row) + delta);
+      ssRenderOnlineSheet();
+      if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
+    }
+
+    function ssFitOnlineColumn() {
+      const col = ssOnlineActive.col;
+      let maxLen = ssColumnName(col).length;
+      for (let r = 0; r < ssOnlineRows; r++) {
+        maxLen = Math.max(maxLen, String(ssOnlineCellValue(r, col)).length);
+      }
+      ssSetOnlineColumnWidth(col, Math.min(420, Math.max(88, maxLen * 8 + 26)));
+      ssRenderOnlineSheet();
+      if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
+    }
+
+    function ssStartColumnResize(event, col) {
+      event.preventDefault();
+      event.stopPropagation();
+      const startX = event.clientX;
+      const startWidth = ssOnlineColWidth(col);
+      const move = (e) => {
+        ssSetOnlineColumnWidth(col, startWidth + (e.clientX - startX));
+        ssApplyOnlineDimensions();
+      };
+      const up = () => {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    }
+
+    function ssStartRowResize(event, row) {
+      event.preventDefault();
+      event.stopPropagation();
+      const startY = event.clientY;
+      const startHeight = ssOnlineRowHeight(row);
+      const move = (e) => {
+        ssSetOnlineRowHeight(row, startHeight + (e.clientY - startY));
+        ssApplyOnlineDimensions();
+      };
+      const up = () => {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    }
+
+    function ssApplyOnlineDimensions() {
+      document.querySelectorAll('.online-sheet-grid thead th[data-col]').forEach(th => {
+        const col = parseInt(th.dataset.col, 10);
+        const width = ssOnlineColWidth(col);
+        th.style.width = width + 'px';
+        th.style.minWidth = width + 'px';
+      });
+      document.querySelectorAll('.online-sheet-grid input[data-col]').forEach(input => {
+        const col = parseInt(input.dataset.col, 10);
+        const row = parseInt(input.dataset.row, 10);
+        const width = ssOnlineColWidth(col);
+        const height = ssOnlineRowHeight(row);
+        input.style.width = width + 'px';
+        input.style.height = height + 'px';
+        input.parentElement.style.width = width + 'px';
+        input.parentElement.style.minWidth = width + 'px';
+        input.parentElement.style.height = height + 'px';
+      });
+      document.querySelectorAll('.online-sheet-grid .row-head').forEach((head, row) => {
+        const height = ssOnlineRowHeight(row);
+        head.style.height = height + 'px';
+        head.parentElement.style.height = height + 'px';
+      });
+    }
+
+    function ssClearOnlineSheet() {
+      if (!confirm('Online Sheet ka saara data clear karna hai?')) return;
+      ssOnlineBook().cells = {};
+      ssOnlineActive = { row: 0, col: 0 };
+      ssRenderOnlineSheet();
+      if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
+      showToast('success', 'Online Sheet clear ho gayi.');
+    }
+
+    function ssGetDateRange() {
+      const from = document.getElementById('ss-date-from')?.value || '';
+      const to = document.getElementById('ss-date-to')?.value || '';
+      return { from, to };
+    }
+
+    function ssInRange(dateStr, from, to) {
+      if (!dateStr) return true;
+      if (from && dateStr < from) return false;
+      if (to && dateStr > to) return false;
+      return true;
+    }
+
+    function ssClearDates() {
+      document.getElementById('ss-date-from').value = '';
+      document.getElementById('ss-date-to').value = '';
+      ssRender();
+    }
+
+    function ssRender() {
+      const { from, to } = ssGetDateRange();
+      const container = document.getElementById('ss-table-container');
+      const cardsEl = document.getElementById('ss-summary-cards');
+      if (!container) return;
+
+      if (ssCurrentTab === 'online') {
+        ssRenderOnlineSheet();
+        return;
+      }
+
+      if (ssCurrentTab === 'sales') {
+        const data = (store.sales || []).filter(r => ssInRange(r.date, from, to));
+        const totalAmt = data.reduce((a, r) => a + calcTotals(r.items).total, 0);
+        const paid = data.filter(r => r.status === 'paid').reduce((a, r) => a + calcTotals(r.items).total, 0);
+        const unpaid = totalAmt - paid;
+        cardsEl.innerHTML = `
+          <div style="background:#e8f4fd;border:1px solid #90caf9;border-radius:10px;padding:14px 22px;min-width:160px;text-align:center;">
+            <div style="font-size:12px;color:#1565c0;font-weight:700;">TOTAL SALES</div>
+            <div style="font-size:22px;font-weight:900;color:#1a73e8;">${fmt(totalAmt)}</div>
+            <div style="font-size:12px;color:#555;">${data.length} invoices</div>
+          </div>
+          <div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:10px;padding:14px 22px;min-width:160px;text-align:center;">
+            <div style="font-size:12px;color:#2e7d32;font-weight:700;">RECEIVED</div>
+            <div style="font-size:22px;font-weight:900;color:#2e7d32;">${fmt(paid)}</div>
+          </div>
+          <div style="background:#fff3e0;border:1px solid #ffcc80;border-radius:10px;padding:14px 22px;min-width:160px;text-align:center;">
+            <div style="font-size:12px;color:#e65100;font-weight:700;">PENDING</div>
+            <div style="font-size:22px;font-weight:900;color:#e65100;">${fmt(unpaid)}</div>
+          </div>`;
+        container.innerHTML = `
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead><tr style="background:#1a73e8;color:#fff;">
+              <th style="padding:10px 12px;text-align:left;">#</th>
+              <th style="padding:10px 12px;text-align:left;">Invoice No</th>
+              <th style="padding:10px 12px;text-align:left;">Customer</th>
+              <th style="padding:10px 12px;text-align:left;">Date</th>
+              <th style="padding:10px 12px;text-align:right;">Items</th>
+              <th style="padding:10px 12px;text-align:right;">Subtotal</th>
+              <th style="padding:10px 12px;text-align:right;">GST</th>
+              <th style="padding:10px 12px;text-align:right;">Total</th>
+              <th style="padding:10px 12px;text-align:center;">Status</th>
+            </tr></thead>
+            <tbody>${data.length === 0 ? '<tr><td colspan="9" style="text-align:center;padding:30px;color:#888;">Koi sale nahi mili</td></tr>' :
+              data.map((r, i) => {
+                const t = calcTotals(r.items);
+                const rowBg = i % 2 === 0 ? '#fff' : '#f8fbff';
+                const statusColor = r.status === 'paid' ? '#2e7d32' : r.status === 'unpaid' ? '#c62828' : '#e65100';
+                return `<tr style="background:${rowBg};border-bottom:1px solid #e8edf3;">
+                  <td style="padding:9px 12px;color:#888;">${i+1}</td>
+                  <td style="padding:9px 12px;font-weight:700;color:#1a73e8;">${r.invoiceNo||'-'}</td>
+                  <td style="padding:9px 12px;font-weight:600;">${r.party||'-'}</td>
+                  <td style="padding:9px 12px;color:#555;">${niceDate(r.date)}</td>
+                  <td style="padding:9px 12px;text-align:right;">${r.items.length}</td>
+                  <td style="padding:9px 12px;text-align:right;">${fmt(t.sub)}</td>
+                  <td style="padding:9px 12px;text-align:right;color:#e65100;">${fmt(t.gst)}</td>
+                  <td style="padding:9px 12px;text-align:right;font-weight:800;color:#1a73e8;">${fmt(t.total)}</td>
+                  <td style="padding:9px 12px;text-align:center;"><span style="background:${statusColor}22;color:${statusColor};padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;">${r.status?.toUpperCase()||'—'}</span></td>
+                </tr>`;
+              }).join('')
+            }</tbody>
+          </table>`;
+
+      } else if (ssCurrentTab === 'purchase') {
+        const data = (store.purchases || []).filter(r => ssInRange(r.date, from, to));
+        const totalAmt = data.reduce((a, r) => a + calcTotals(r.items).total, 0);
+        const paid = data.filter(r => r.status === 'paid').reduce((a, r) => a + calcTotals(r.items).total, 0);
+        cardsEl.innerHTML = `
+          <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:10px;padding:14px 22px;min-width:160px;text-align:center;">
+            <div style="font-size:12px;color:#f57f17;font-weight:700;">TOTAL PURCHASE</div>
+            <div style="font-size:22px;font-weight:900;color:#f57f17;">${fmt(totalAmt)}</div>
+            <div style="font-size:12px;color:#555;">${data.length} bills</div>
+          </div>
+          <div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:10px;padding:14px 22px;min-width:160px;text-align:center;">
+            <div style="font-size:12px;color:#2e7d32;font-weight:700;">PAID</div>
+            <div style="font-size:22px;font-weight:900;color:#2e7d32;">${fmt(paid)}</div>
+          </div>
+          <div style="background:#fce4ec;border:1px solid #f48fb1;border-radius:10px;padding:14px 22px;min-width:160px;text-align:center;">
+            <div style="font-size:12px;color:#c62828;font-weight:700;">UNPAID</div>
+            <div style="font-size:22px;font-weight:900;color:#c62828;">${fmt(totalAmt - paid)}</div>
+          </div>`;
+        container.innerHTML = `
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead><tr style="background:#f57f17;color:#fff;">
+              <th style="padding:10px 12px;text-align:left;">#</th>
+              <th style="padding:10px 12px;text-align:left;">Bill No</th>
+              <th style="padding:10px 12px;text-align:left;">Vendor</th>
+              <th style="padding:10px 12px;text-align:left;">Date</th>
+              <th style="padding:10px 12px;text-align:right;">Items</th>
+              <th style="padding:10px 12px;text-align:right;">Subtotal</th>
+              <th style="padding:10px 12px;text-align:right;">GST</th>
+              <th style="padding:10px 12px;text-align:right;">Total</th>
+              <th style="padding:10px 12px;text-align:center;">Status</th>
+            </tr></thead>
+            <tbody>${data.length === 0 ? '<tr><td colspan="9" style="text-align:center;padding:30px;color:#888;">Koi purchase nahi mila</td></tr>' :
+              data.map((r, i) => {
+                const t = calcTotals(r.items);
+                const rowBg = i % 2 === 0 ? '#fff' : '#fffdf5';
+                const statusColor = r.status === 'paid' ? '#2e7d32' : '#c62828';
+                return `<tr style="background:${rowBg};border-bottom:1px solid #e8edf3;">
+                  <td style="padding:9px 12px;color:#888;">${i+1}</td>
+                  <td style="padding:9px 12px;font-weight:700;color:#f57f17;">${r.invoiceNo||'-'}</td>
+                  <td style="padding:9px 12px;font-weight:600;">${r.party||'-'}</td>
+                  <td style="padding:9px 12px;color:#555;">${niceDate(r.date)}</td>
+                  <td style="padding:9px 12px;text-align:right;">${r.items.length}</td>
+                  <td style="padding:9px 12px;text-align:right;">${fmt(t.sub)}</td>
+                  <td style="padding:9px 12px;text-align:right;color:#e65100;">${fmt(t.gst)}</td>
+                  <td style="padding:9px 12px;text-align:right;font-weight:800;color:#f57f17;">${fmt(t.total)}</td>
+                  <td style="padding:9px 12px;text-align:center;"><span style="background:${statusColor}22;color:${statusColor};padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;">${r.status?.toUpperCase()||'—'}</span></td>
+                </tr>`;
+              }).join('')
+            }</tbody>
+          </table>`;
+
+      } else if (ssCurrentTab === 'returns') {
+        const data = (store.ecomReturns || []).filter(r => ssInRange(r.date, from, to));
+        const totalClaim = data.reduce((a, r) => a + (parseFloat(r.amount)||0), 0);
+        const received = data.filter(r => r.status === 'received').length;
+        const pending = data.filter(r => r.status === 'pending').length;
+        cardsEl.innerHTML = `
+          <div style="background:#f3e5f5;border:1px solid #ce93d8;border-radius:10px;padding:14px 22px;min-width:160px;text-align:center;">
+            <div style="font-size:12px;color:#6a1b9a;font-weight:700;">TOTAL RETURNS</div>
+            <div style="font-size:22px;font-weight:900;color:#6a1b9a;">${data.length}</div>
+            <div style="font-size:12px;color:#555;">orders</div>
+          </div>
+          <div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:10px;padding:14px 22px;min-width:160px;text-align:center;">
+            <div style="font-size:12px;color:#2e7d32;font-weight:700;">RECEIVED</div>
+            <div style="font-size:22px;font-weight:900;color:#2e7d32;">${received}</div>
+          </div>
+          <div style="background:#fff3e0;border:1px solid #ffcc80;border-radius:10px;padding:14px 22px;min-width:160px;text-align:center;">
+            <div style="font-size:12px;color:#e65100;font-weight:700;">PENDING</div>
+            <div style="font-size:22px;font-weight:900;color:#e65100;">${pending}</div>
+          </div>
+          <div style="background:#e8f4fd;border:1px solid #90caf9;border-radius:10px;padding:14px 22px;min-width:160px;text-align:center;">
+            <div style="font-size:12px;color:#1565c0;font-weight:700;">CLAIM AMOUNT</div>
+            <div style="font-size:22px;font-weight:900;color:#1a73e8;">${fmt(totalClaim)}</div>
+          </div>`;
+        const platColors = { meesho:'#9c27b0', amazon:'#ff9900', flipkart:'#2874f0', myntra:'#ff3f6c', flex:'#1a73e8' };
+        container.innerHTML = `
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead><tr style="background:#6a1b9a;color:#fff;">
+              <th style="padding:10px 12px;text-align:left;">#</th>
+              <th style="padding:10px 12px;text-align:left;">Platform</th>
+              <th style="padding:10px 12px;text-align:left;">Order ID / AWB</th>
+              <th style="padding:10px 12px;text-align:left;">Product</th>
+              <th style="padding:10px 12px;text-align:left;">Date</th>
+              <th style="padding:10px 12px;text-align:left;">Return Type</th>
+              <th style="padding:10px 12px;text-align:left;">Status</th>
+              <th style="padding:10px 12px;text-align:right;">Claim (₹)</th>
+            </tr></thead>
+            <tbody>${data.length === 0 ? '<tr><td colspan="8" style="text-align:center;padding:30px;color:#888;">Koi return nahi mila</td></tr>' :
+              data.map((r, i) => {
+                const rowBg = i % 2 === 0 ? '#fff' : '#fdf5ff';
+                const pc = platColors[r.platform] || '#555';
+                const stColor = r.status === 'received' ? '#2e7d32' : r.status === 'damaged' ? '#c62828' : r.status === 'claim_approved' ? '#1a73e8' : '#e65100';
+                return `<tr style="background:${rowBg};border-bottom:1px solid #e8edf3;">
+                  <td style="padding:9px 12px;color:#888;">${i+1}</td>
+                  <td style="padding:9px 12px;"><span style="background:${pc}22;color:${pc};padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;">${(r.platform||'').toUpperCase()}</span></td>
+                  <td style="padding:9px 12px;font-family:monospace;font-size:12px;">${r.orderId||'-'}</td>
+                  <td style="padding:9px 12px;font-weight:600;">${r.productName||r.pname||'-'}</td>
+                  <td style="padding:9px 12px;color:#555;">${niceDate(r.date)}</td>
+                  <td style="padding:9px 12px;font-size:12px;">${r.type||r.returnType||'-'}</td>
+                  <td style="padding:9px 12px;"><span style="background:${stColor}22;color:${stColor};padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;">${(r.status||'').toUpperCase()}</span></td>
+                  <td style="padding:9px 12px;text-align:right;font-weight:700;">${fmt(parseFloat(r.amount)||0)}</td>
+                </tr>`;
+              }).join('')
+            }</tbody>
+          </table>`;
+
+      } else if (ssCurrentTab === 'summary') {
+        const sales = (store.sales || []).filter(r => ssInRange(r.date, from, to));
+        const purchases = (store.purchases || []).filter(r => ssInRange(r.date, from, to));
+        const returns = (store.ecomReturns || []).filter(r => ssInRange(r.date, from, to));
+        const sTotal = sales.reduce((a, r) => a + calcTotals(r.items).total, 0);
+        const pTotal = purchases.reduce((a, r) => a + calcTotals(r.items).total, 0);
+        const rClaim = returns.reduce((a, r) => a + (parseFloat(r.amount)||0), 0);
+        const profit = sTotal - pTotal;
+        cardsEl.innerHTML = '';
+        container.innerHTML = `
+          <div style="padding:20px;">
+            <h3 style="margin-bottom:20px;color:#333;font-size:18px;font-weight:800;">📊 Business Summary Report</h3>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:28px;">
+              <div style="background:linear-gradient(135deg,#1a73e8,#0d47a1);border-radius:14px;padding:20px;color:#fff;text-align:center;">
+                <div style="font-size:13px;opacity:0.85;font-weight:600;">TOTAL SALES</div>
+                <div style="font-size:28px;font-weight:900;margin:6px 0;">${fmt(sTotal)}</div>
+                <div style="font-size:12px;opacity:0.75;">${sales.length} invoices</div>
+              </div>
+              <div style="background:linear-gradient(135deg,#f57f17,#e65100);border-radius:14px;padding:20px;color:#fff;text-align:center;">
+                <div style="font-size:13px;opacity:0.85;font-weight:600;">TOTAL PURCHASE</div>
+                <div style="font-size:28px;font-weight:900;margin:6px 0;">${fmt(pTotal)}</div>
+                <div style="font-size:12px;opacity:0.75;">${purchases.length} bills</div>
+              </div>
+              <div style="background:linear-gradient(135deg,${profit>=0?'#2e7d32,#1b5e20':'#c62828,#b71c1c'});border-radius:14px;padding:20px;color:#fff;text-align:center;">
+                <div style="font-size:13px;opacity:0.85;font-weight:600;">NET PROFIT/LOSS</div>
+                <div style="font-size:28px;font-weight:900;margin:6px 0;">${profit>=0?'+':''}${fmt(profit)}</div>
+                <div style="font-size:12px;opacity:0.75;">Sales − Purchase</div>
+              </div>
+              <div style="background:linear-gradient(135deg,#6a1b9a,#4a148c);border-radius:14px;padding:20px;color:#fff;text-align:center;">
+                <div style="font-size:13px;opacity:0.85;font-weight:600;">RETURNS CLAIM</div>
+                <div style="font-size:28px;font-weight:900;margin:6px 0;">${fmt(rClaim)}</div>
+                <div style="font-size:12px;opacity:0.75;">${returns.length} returns</div>
+              </div>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:14px;">
+              <thead><tr style="background:#f5f7fa;">
+                <th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e0e7ef;color:#444;">Category</th>
+                <th style="padding:12px 16px;text-align:right;border-bottom:2px solid #e0e7ef;color:#444;">Count</th>
+                <th style="padding:12px 16px;text-align:right;border-bottom:2px solid #e0e7ef;color:#444;">Amount</th>
+                <th style="padding:12px 16px;text-align:right;border-bottom:2px solid #e0e7ef;color:#444;">Paid/Received</th>
+                <th style="padding:12px 16px;text-align:right;border-bottom:2px solid #e0e7ef;color:#444;">Pending</th>
+              </tr></thead>
+              <tbody>
+                <tr style="border-bottom:1px solid #eee;background:#fff;">
+                  <td style="padding:12px 16px;font-weight:700;color:#1a73e8;"><i class="ti ti-file-invoice"></i> Sales</td>
+                  <td style="padding:12px 16px;text-align:right;">${sales.length}</td>
+                  <td style="padding:12px 16px;text-align:right;font-weight:700;">${fmt(sTotal)}</td>
+                  <td style="padding:12px 16px;text-align:right;color:#2e7d32;">${fmt(sales.filter(r=>r.status==='paid').reduce((a,r)=>a+calcTotals(r.items).total,0))}</td>
+                  <td style="padding:12px 16px;text-align:right;color:#e65100;">${fmt(sales.filter(r=>r.status!=='paid').reduce((a,r)=>a+calcTotals(r.items).total,0))}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #eee;background:#fffdf5;">
+                  <td style="padding:12px 16px;font-weight:700;color:#f57f17;"><i class="ti ti-shopping-cart"></i> Purchase</td>
+                  <td style="padding:12px 16px;text-align:right;">${purchases.length}</td>
+                  <td style="padding:12px 16px;text-align:right;font-weight:700;">${fmt(pTotal)}</td>
+                  <td style="padding:12px 16px;text-align:right;color:#2e7d32;">${fmt(purchases.filter(r=>r.status==='paid').reduce((a,r)=>a+calcTotals(r.items).total,0))}</td>
+                  <td style="padding:12px 16px;text-align:right;color:#c62828;">${fmt(purchases.filter(r=>r.status!=='paid').reduce((a,r)=>a+calcTotals(r.items).total,0))}</td>
+                </tr>
+                <tr style="border-bottom:1px solid #eee;background:#fdf5ff;">
+                  <td style="padding:12px 16px;font-weight:700;color:#6a1b9a;"><i class="ti ti-truck-return"></i> Returns</td>
+                  <td style="padding:12px 16px;text-align:right;">${returns.length}</td>
+                  <td style="padding:12px 16px;text-align:right;font-weight:700;">${fmt(rClaim)}</td>
+                  <td style="padding:12px 16px;text-align:right;color:#2e7d32;">${returns.filter(r=>r.status==='received'||r.status==='claim_approved').length} received</td>
+                  <td style="padding:12px 16px;text-align:right;color:#e65100;">${returns.filter(r=>r.status==='pending').length} pending</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>`;
+      }
+    }
+
+    function ssExportExcel() {
+      const { from, to } = ssGetDateRange();
+      let sheetData = [];
+      let sheetName = 'Report';
+
+      if (ssCurrentTab === 'online') {
+        // Google Sheet tab pe click kiya - seedha Google Sheet open karo download ke liye
+        window.open('https://docs.google.com/spreadsheets/d/1WVKiUnIKsXYfinFa9JFALUie7PYoiVnT9CB0p-RlYMU/export?format=xlsx', '_blank');
+        showToast('success', 'Google Sheet download ho rahi hai!');
+        return;
+      } else if (ssCurrentTab === 'sales') {
+        sheetName = 'Sales Report';
+        sheetData = [['#','Invoice No','Customer','Date','Items','Subtotal','GST','Total','Status']];
+        (store.sales||[]).filter(r => ssInRange(r.date, from, to)).forEach((r, i) => {
+          const t = calcTotals(r.items);
+          sheetData.push([i+1, r.invoiceNo, r.party, r.date, r.items.length, Math.round(t.sub), Math.round(t.gst), Math.round(t.total), r.status]);
+        });
+      } else if (ssCurrentTab === 'purchase') {
+        sheetName = 'Purchase Report';
+        sheetData = [['#','Bill No','Vendor','Date','Items','Subtotal','GST','Total','Status']];
+        (store.purchases||[]).filter(r => ssInRange(r.date, from, to)).forEach((r, i) => {
+          const t = calcTotals(r.items);
+          sheetData.push([i+1, r.invoiceNo, r.party, r.date, r.items.length, Math.round(t.sub), Math.round(t.gst), Math.round(t.total), r.status]);
+        });
+      } else if (ssCurrentTab === 'returns') {
+        sheetName = 'Returns Report';
+        sheetData = [['#','Platform','Order ID','Product','Date','Return Type','Status','Claim Amount']];
+        (store.ecomReturns||[]).filter(r => ssInRange(r.date, from, to)).forEach((r, i) => {
+          sheetData.push([i+1, r.platform, r.orderId, r.productName||r.pname, r.date, r.type||r.returnType, r.status, parseFloat(r.amount)||0]);
+        });
+      } else {
+        sheetName = 'Summary';
+        const sales = (store.sales||[]).filter(r => ssInRange(r.date, from, to));
+        const purchases = (store.purchases||[]).filter(r => ssInRange(r.date, from, to));
+        const returns = (store.ecomReturns||[]).filter(r => ssInRange(r.date, from, to));
+        const sTotal = sales.reduce((a,r)=>a+calcTotals(r.items).total,0);
+        const pTotal = purchases.reduce((a,r)=>a+calcTotals(r.items).total,0);
+        sheetData = [
+          ['Category','Count','Total Amount','Paid/Received','Pending'],
+          ['Sales', sales.length, Math.round(sTotal), Math.round(sales.filter(r=>r.status==='paid').reduce((a,r)=>a+calcTotals(r.items).total,0)), Math.round(sales.filter(r=>r.status!=='paid').reduce((a,r)=>a+calcTotals(r.items).total,0))],
+          ['Purchase', purchases.length, Math.round(pTotal), Math.round(purchases.filter(r=>r.status==='paid').reduce((a,r)=>a+calcTotals(r.items).total,0)), Math.round(purchases.filter(r=>r.status!=='paid').reduce((a,r)=>a+calcTotals(r.items).total,0))],
+          ['Returns (Claim)', returns.length, Math.round(returns.reduce((a,r)=>a+(parseFloat(r.amount)||0),0)), returns.filter(r=>r.status==='received'||r.status==='claim_approved').length + ' received', returns.filter(r=>r.status==='pending').length + ' pending'],
+          [],
+          ['Net Profit/Loss (Sales - Purchase)', '', Math.round(sTotal - pTotal)]
+        ];
+      }
+
+      if (typeof XLSX !== 'undefined') {
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(sheetData);
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        XLSX.writeFile(wb, sheetName.replace(/ /g,'_') + '_' + new Date().toISOString().slice(0,10) + '.xlsx');
+        showToast('success', sheetName + ' Excel mein export ho gaya!');
+      } else {
+        showToast('error', 'XLSX library load nahi hui. Refresh karein.');
+      }
     }
 
     // ─── RENDER FUNCTIONS ────────────────────────────────────────────────────
@@ -1737,9 +2335,10 @@
     }
 
     function splitBillNo(value, fallbackPrefix) {
-      const match = String(value || '').match(/^([A-Za-z]+-?0*)(.*)$/);
-      if (!match) return { prefix: fallbackPrefix, number: value || '' };
-      return { prefix: match[1].replace(/0+$/, '') || fallbackPrefix, number: match[2] };
+      const str = String(value || '');
+      const match = str.match(/^([A-Za-z]+-?)(\d+.*)$/);
+      if (!match) return { prefix: fallbackPrefix, number: str || '' };
+      return { prefix: match[1] || fallbackPrefix, number: match[2] };
     }
 
     function addItemRow(data = {}) {
@@ -1856,8 +2455,9 @@
       items.forEach(it => {
         const p = findProduct(it.name);
         if (p) {
-          if (action === 'add') p.stock = (p.stock || 0) + it.qty;
-          else p.stock = Math.max(0, (p.stock || 0) - it.qty);
+          const qty = parseFloat(it.qty) || 0;
+          if (action === 'add') p.stock = (p.stock || 0) + qty;
+          else p.stock = Math.max(0, (p.stock || 0) - qty);
         }
       });
     }
@@ -2472,6 +3072,22 @@
     window.closeCustomerLedger = closeCustomerLedger;
     window.deleteEmployeeRecord = deleteEmployeeRecord;
     window.quickAddChip = quickAddChip;
+    window.ssShowTab = ssShowTab;
+    window.ssRender = ssRender;
+    window.ssClearDates = ssClearDates;
+    window.ssExportExcel = ssExportExcel;
+    window.ssSetOnlineActive = ssSetOnlineActive;
+    window.ssEditOnlineCell = ssEditOnlineCell;
+    window.ssUpdateActiveCell = ssUpdateActiveCell;
+    window.ssPasteOnlineCells = ssPasteOnlineCells;
+    window.ssAddOnlineRow = ssAddOnlineRow;
+    window.ssAddOnlineColumn = ssAddOnlineColumn;
+    window.ssClearOnlineSheet = ssClearOnlineSheet;
+    window.ssFitOnlineColumn = ssFitOnlineColumn;
+    window.ssAdjustOnlineColumn = ssAdjustOnlineColumn;
+    window.ssAdjustOnlineRow = ssAdjustOnlineRow;
+    window.ssStartColumnResize = ssStartColumnResize;
+    window.ssStartRowResize = ssStartRowResize;
 
     // ─── FIX: CLOSE ALL MODALS ON ESCAPE KEY ──────────────────────────────
     document.addEventListener('keydown', function(e) {
@@ -2516,612 +3132,297 @@
       }
     });
 
+    // ─── BARCODE SCANNER ────────────────────────────────────────────────────
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzpwcg2U04A9yw2FnU8RJEwTevslXAHcbKaGBVMk6u-lUhIm3Lv4hJ-oY5dUQwF9XWc/exec';
 
-  </script>
+    window.sendBarcode = async function() {
+      const input = document.getElementById('scanner-input');
+      const qtyEl = document.getElementById('scanner-qty');
+      const statusEl = document.getElementById('scanner-status');
+      const btn = document.getElementById('scanner-send-btn');
 
-  <!-- ─── SPREADSHEET ENGINE (non-module, runs after DOM) ────────────────── -->
-  <script>
-  (function() {
-    // ── CONFIG ──────────────────────────────────────────────────────────────
-    const ROWS = 50, COLS = 26;
-    const COL_WIDTH = 100, ROW_HEIGHT = 26, HEADER_W = 40;
+      const barcode = input.value.trim();
+      const qty = parseInt(qtyEl.value) || 1;
 
-    // ── STATE ───────────────────────────────────────────────────────────────
-    let ssBooks = {};       // { sheetName: { cells: {}, formats: {} } }
-    let ssSheetOrder = [];  // sheet name order
-    let ssActiveSheet = '';
-    let ssSelectedCell = null; // { r, c }
-    let ssSelStart = null, ssSelEnd = null; // multi-select range
-    let ssEditing = false;
-    let ssFrozenRows = 0;
-    let ssInited = false;
+      if (!barcode) {
+        input.focus();
+        return;
+      }
 
-    function ssCurrentBook() { return ssBooks[ssActiveSheet] || { cells: {}, formats: {} }; }
-    function ssCellKey(r, c) { return r + ',' + c; }
-    function ssColName(c) { return String.fromCharCode(65 + c); }
-    function ssCellName(r, c) { return ssColName(c) + (r + 1); }
+      // UI: loading state
+      btn.disabled = true;
+      btn.innerHTML = '<i class="ti ti-loader"></i> Sending...';
+      statusEl.style.display = 'none';
 
-    // ── FORMULA ENGINE ──────────────────────────────────────────────────────
-    function ssEval(expr, visited) {
-      visited = visited || new Set();
-      if (typeof expr !== 'string') return expr;
-      expr = expr.trim();
-      if (!expr.startsWith('=')) return isNaN(expr) ? expr : (expr === '' ? '' : Number(expr));
-      const formula = expr.slice(1).toUpperCase();
-      const book = ssCurrentBook();
-
-      // Prevent circular
-      if (visited.has(expr)) return '#CIRC!';
+      const now = new Date();
+      const datetime = now.toLocaleString('en-IN', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+      });
 
       try {
-        // Replace cell refs like A1, B3 etc
-        let processed = formula.replace(/([A-Z]+)\$?(\d+)/g, (_, col, row) => {
-          const c = col.charCodeAt(0) - 65;
-          const r = parseInt(row) - 1;
-          const key = ssCellKey(r, c);
-          const raw = book.cells[key] || '';
-          const val = ssEval(raw, new Set([...visited, expr]));
-          return (typeof val === 'number' || (!isNaN(val) && val !== '')) ? (Number(val) || 0) : ('"' + String(val).replace(/"/g,'') + '"');
+        const res = await fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ barcode, datetime, quantity: qty })
         });
 
-        // SUM(range)
-        processed = processed.replace(/SUM\(([A-Z]\d+):([A-Z]\d+)\)/g, (_, a, b) => String(ssRangeSum(a, b, book, visited)));
-        // AVERAGE
-        processed = processed.replace(/AVERAGE\(([A-Z]\d+):([A-Z]\d+)\)/g, (_, a, b) => String(ssRangeAvg(a, b, book, visited)));
-        // COUNT
-        processed = processed.replace(/COUNT\(([A-Z]\d+):([A-Z]\d+)\)/g, (_, a, b) => String(ssRangeCount(a, b, book, visited)));
-        // MAX
-        processed = processed.replace(/MAX\(([A-Z]\d+):([A-Z]\d+)\)/g, (_, a, b) => String(ssRangeMax(a, b, book, visited)));
-        // MIN
-        processed = processed.replace(/MIN\(([A-Z]\d+):([A-Z]\d+)\)/g, (_, a, b) => String(ssRangeMin(a, b, book, visited)));
-        // IF(cond, true, false)
-        processed = processed.replace(/IF\((.+),(.+),(.+)\)/, (_, cond, t, f) => {
-          try { return Function('"use strict"; return (' + cond + ')')() ? t.trim() : f.trim(); } catch(e) { return '#ERR!'; }
-        });
-        // ROUND
-        processed = processed.replace(/ROUND\(([^,]+),(\d+)\)/g, (_, v, d) => {
-          const n = parseFloat(v); return isNaN(n) ? '#ERR!' : String(Math.round(n * Math.pow(10,+d)) / Math.pow(10,+d));
-        });
-        // CONCATENATE / &
-        if (processed.includes('CONCATENATE(')) {
-          processed = processed.replace(/CONCATENATE\((.+)\)/, (_, args) =>
-            '"' + args.split(',').map(a => a.trim().replace(/^"|"$/g,'')).join('') + '"');
+        // no-cors mode mein response check nahi hota, assume success
+        showScannerStatus('success', `✅ Sent: ${barcode} (Qty: ${qty})`);
+        addToScanLog(barcode, qty, datetime);
+
+        // Auto-focus & clear
+        if (document.getElementById('scanner-autofocus').checked) {
+          input.value = '';
+          qtyEl.value = '1';
+          input.focus();
         }
 
-        const result = Function('"use strict"; return (' + processed + ')')();
-        if (typeof result === 'number') return Math.round(result * 1e9) / 1e9;
-        return result;
-      } catch(e) { return '#ERR!'; }
-    }
+        // Google Sheet iframe refresh (2 sec baad)
+        setTimeout(() => {
+          const iframe = document.querySelector('#ss-table-container iframe');
+          if (iframe) {
+            const src = iframe.src;
+            iframe.src = '';
+            setTimeout(() => { iframe.src = src; }, 100);
+          }
+        }, 2000);
 
-    function ssGetNum(key, book, visited) {
-      const raw = book.cells[key] || '';
-      const v = ssEval(raw, visited);
-      return parseFloat(v) || 0;
-    }
-    function ssRangeCells(a, b) {
-      const c1 = a.charCodeAt(0)-65, r1 = parseInt(a.slice(1))-1;
-      const c2 = b.charCodeAt(0)-65, r2 = parseInt(b.slice(1))-1;
-      const keys = [];
-      for (let r = Math.min(r1,r2); r <= Math.max(r1,r2); r++)
-        for (let c = Math.min(c1,c2); c <= Math.max(c1,c2); c++)
-          keys.push(ssCellKey(r,c));
-      return keys;
-    }
-    function ssRangeSum(a, b, book, visited) {
-      return ssRangeCells(a,b).reduce((s,k) => s + (parseFloat(ssEval(book.cells[k]||'',visited))||0), 0);
-    }
-    function ssRangeAvg(a, b, book, visited) {
-      const keys = ssRangeCells(a,b);
-      const nums = keys.map(k => parseFloat(ssEval(book.cells[k]||'',visited))).filter(v=>!isNaN(v));
-      return nums.length ? nums.reduce((s,v)=>s+v,0)/nums.length : 0;
-    }
-    function ssRangeCount(a, b, book, visited) {
-      return ssRangeCells(a,b).filter(k => (book.cells[k]||'') !== '').length;
-    }
-    function ssRangeMax(a, b, book, visited) {
-      const nums = ssRangeCells(a,b).map(k=>parseFloat(ssEval(book.cells[k]||'',visited))).filter(v=>!isNaN(v));
-      return nums.length ? Math.max(...nums) : 0;
-    }
-    function ssRangeMin(a, b, book, visited) {
-      const nums = ssRangeCells(a,b).map(k=>parseFloat(ssEval(book.cells[k]||'',visited))).filter(v=>!isNaN(v));
-      return nums.length ? Math.min(...nums) : 0;
-    }
-
-    // ── STORAGE ─────────────────────────────────────────────────────────────
-    let ssSaveTimer = null;
-
-    function ssSave() {
-      // localStorage mein save karo + module script ke zariye Firebase mein bhi
-      try { localStorage.setItem('billpro_ss', JSON.stringify({ books: ssBooks, order: ssSheetOrder, active: ssActiveSheet })); } catch(e) {}
-      // Firebase save: module script ka saveData trigger karo
-      if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
-    }
-
-    // ── INIT ────────────────────────────────────────────────────────────────
-    // Expose globals for scan system
-    window.ssBooks = ssBooks;
-    window.ssSheetOrder = ssSheetOrder;
-
-    // Firebase bridge: module script in karo data deta/leta hai
-    window._ssGetSaveData = function() {
-      return { books: ssBooks, order: ssSheetOrder, active: ssActiveSheet };
-    };
-    window._ssSetLoadData = function(d) {
-      if (!d || !d.books) return;
-      ssBooks = d.books;
-      ssSheetOrder = d.order || [];
-      ssActiveSheet = d.active || (d.order && d.order[0]) || '';
-      ssRefreshGlobals();
-      try { localStorage.setItem('billpro_ss', JSON.stringify({ books: ssBooks, order: ssSheetOrder, active: ssActiveSheet })); } catch(e) {}
-    };
-
-    // Listen for external refresh trigger
-    document.addEventListener('ss-refresh', function() { ssRender(); });
-
-    window.initSpreadsheet = function() {
-      if (!document.getElementById('ss-grid')) return;
-      // Agar _ssSetLoadData pehle se call ho chuka (login ke waqt), to load skip karo
-      const alreadyLoaded = ssSheetOrder.length > 0;
-      if (!alreadyLoaded) {
-        // Fallback: localStorage se load karo
-        try {
-          const raw = localStorage.getItem('billpro_ss');
-          if (raw) { const d = JSON.parse(raw); ssBooks = d.books||{}; ssSheetOrder = d.order||[]; ssActiveSheet = d.active||''; }
-        } catch(e) {}
+      } catch (err) {
+        showScannerStatus('error', '❌ Error: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="ti ti-send"></i> Google Sheet mein Send';
       }
-      if (ssSheetOrder.length === 0) { ssCreateSheet('Sheet1'); ssCreateSheet('Sheet2'); }
-      if (!ssBooks[ssActiveSheet]) ssActiveSheet = ssSheetOrder[0];
-      ssRefreshGlobals();
-      ssRender();
-      ssInited = true;
     };
 
-    function ssRefreshGlobals() {
-      window.ssBooks = ssBooks;
-      window.ssSheetOrder = ssSheetOrder;
+    function showScannerStatus(type, msg) {
+      const el = document.getElementById('scanner-status');
+      el.style.display = 'block';
+      el.style.background = type === 'success' ? '#e6f9f0' : '#ffeaea';
+      el.style.color = type === 'success' ? '#1a7a4a' : '#c0392b';
+      el.style.border = `1px solid ${type === 'success' ? '#a3e4c1' : '#f5c6cb'}`;
+      el.textContent = msg;
+      setTimeout(() => { el.style.display = 'none'; }, 3000);
     }
 
-    function ssCreateSheet(name) {
-      if (!name) name = 'Sheet' + (ssSheetOrder.length + 1);
-      if (ssBooks[name]) { alert('Sheet name pehle se hai!'); return; }
-      ssBooks[name] = { cells: {}, formats: {} };
-      ssSheetOrder.push(name);
-      ssActiveSheet = name;
-      ssSave();
+    const scanLogEntries = [];
+
+    function addToScanLog(barcode, qty, datetime) {
+      scanLogEntries.unshift({ barcode, qty, datetime });
+      if (scanLogEntries.length > 20) scanLogEntries.pop();
+      renderScanLog();
     }
 
-    window.addNewSheet = function() {
-      const name = prompt('Naye sheet ka naam:');
-      if (!name) return;
-      ssCreateSheet(name.trim());
-      ssRender();
-    };
-
-    window.deleteCurrentSheet = function() {
-      if (ssSheetOrder.length <= 1) { alert('Last sheet delete nahi kar sakte!'); return; }
-      if (!confirm('Sheet "' + ssActiveSheet + '" delete karna chahte hain?')) return;
-      const idx = ssSheetOrder.indexOf(ssActiveSheet);
-      delete ssBooks[ssActiveSheet];
-      ssSheetOrder.splice(idx, 1);
-      ssActiveSheet = ssSheetOrder[Math.max(0, idx-1)];
-      ssSave();
-      ssRender();
-    };
-
-    window.switchSheet = function(name) {
-      ssActiveSheet = name;
-      ssSelectedCell = null; ssSelStart = null; ssSelEnd = null;
-      ssRender();
-    };
-
-    // ── RENDER GRID ─────────────────────────────────────────────────────────
-    function ssRender() {
-      ssRefreshGlobals();
-      const book = ssCurrentBook();
-      const grid = document.getElementById('ss-grid');
-      if (!grid) return;
-
-      const numRows = Math.max(ROWS, Object.keys(book.cells).reduce((m,k)=>Math.max(m,parseInt(k.split(',')[0])+1),ROWS));
-      const numCols = Math.max(COLS, Object.keys(book.cells).reduce((m,k)=>Math.max(m,parseInt(k.split(',')[1])+1),COLS));
-
-      let html = '<thead><tr><th style="width:'+HEADER_W+'px;min-width:'+HEADER_W+'px;background:#f0f4f8;border:1px solid var(--line);position:sticky;top:0;left:0;z-index:3;"></th>';
-      for (let c = 0; c < numCols; c++) {
-        html += '<th style="width:'+COL_WIDTH+'px;min-width:'+COL_WIDTH+'px;background:#f0f4f8;border:1px solid var(--line);font-size:12px;font-weight:700;color:var(--muted);text-align:center;padding:4px;position:sticky;top:0;z-index:2;" data-col="'+c+'" onclick="ssSelectCol('+c+')" title="Click to select column">'+ssColName(c)+'</th>';
+    function renderScanLog() {
+      const logEl = document.getElementById('scan-log');
+      if (!logEl) return;
+      if (!scanLogEntries.length) {
+        logEl.innerHTML = '<p style="font-size:12px;color:var(--muted);text-align:center;padding:12px 0;">Abhi koi scan nahi hua</p>';
+        return;
       }
-      html += '</tr></thead><tbody>';
+      logEl.innerHTML = scanLogEntries.map(e => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:#f7f9fb;border-radius:6px;border:1px solid var(--line-soft);">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--text);">${esc(e.barcode)}</div>
+            <div style="font-size:11px;color:var(--muted);">${e.datetime} · Qty: ${e.qty}</div>
+          </div>
+          <i class="ti ti-circle-check" style="color:var(--green);font-size:16px;"></i>
+        </div>`).join('');
+    }
 
-      for (let r = 0; r < numRows; r++) {
-        const frozen = ssFrozenRows > 0 && r < ssFrozenRows;
-        html += '<tr>';
-        html += '<td style="background:#f0f4f8;border:1px solid var(--line);font-size:11px;font-weight:700;color:var(--muted);text-align:center;padding:2px 4px;width:'+HEADER_W+'px;min-width:'+HEADER_W+'px;'+(frozen?'position:sticky;top:30px;z-index:1;':'')+'" onclick="ssSelectRow('+r+')" title="Click to select row">'+(r+1)+'</td>';
-        for (let c = 0; c < numCols; c++) {
-          const key = ssCellKey(r, c);
-          const raw = book.cells[key] || '';
-          const fmt = book.formats[key] || {};
-          let display = '';
-          try { display = ssEval(raw); } catch(e) { display = '#ERR!'; }
-          if (display === null || display === undefined) display = '';
+    window.clearScanLog = function() {
+      scanLogEntries.length = 0;
+      renderScanLog();
+    };
 
-          const isSelected = ssSelectedCell && ssSelectedCell.r === r && ssSelectedCell.c === c;
-          const inRange = ssSelStart && ssSelEnd && ssInRange(r,c,ssSelStart,ssSelEnd);
+    window.toggleScannerAutofocus = function() {};
 
-          let cellStyle = 'border:1px solid var(--line);min-width:'+COL_WIDTH+'px;max-width:'+COL_WIDTH+'px;height:'+ROW_HEIGHT+'px;padding:2px 6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:cell;user-select:none;';
-          if (isSelected) cellStyle += 'outline:2px solid var(--blue);outline-offset:-1px;background:#e8f0fe;';
-          else if (inRange) cellStyle += 'background:#dbeafe;';
-          else cellStyle += 'background:'+(fmt.bgColor||'#fff')+';';
+    // ─── CAMERA BARCODE SCANNER (ZXing) ─────────────────────────────────────
+    let codeReader = null;
+    let cameraStream = null;
+    let isCameraOn = false;
 
-          if (fmt.bold) cellStyle += 'font-weight:700;';
-          if (fmt.italic) cellStyle += 'font-style:italic;';
-          if (fmt.underline) cellStyle += 'text-decoration:underline;';
-          if (fmt.color) cellStyle += 'color:'+fmt.color+';';
-          if (fmt.fontSize) cellStyle += 'font-size:'+fmt.fontSize+'px;';
-          if (fmt.align) cellStyle += 'text-align:'+fmt.align+';';
-          else if (typeof display === 'number') cellStyle += 'text-align:right;';
+    window.toggleCameraScanner = async function() {
+      if (isCameraOn) {
+        stopCameraScanner();
+      } else {
+        startCameraScanner();
+      }
+    };
 
-          html += '<td style="'+cellStyle+'" data-r="'+r+'" data-c="'+c+'"'
-            + ' onclick="ssClickCell('+r+','+c+',event)"'
-            + ' ondblclick="ssStartEdit('+r+','+c+')"'
-            + ' onmousedown="ssMouseDown('+r+','+c+',event)"'
-            + ' onmousemove="ssMouseMove('+r+','+c+',event)"'
-            + ' title="'+(raw.startsWith('=')?raw:'')+'"'
-            + '>' + String(display) + '</td>';
+    window.startCameraScanner = async function() {
+      const container = document.getElementById('camera-container');
+      const btn = document.getElementById('camera-scan-btn');
+      const statusEl = document.getElementById('camera-status');
+
+      // ZXing library check
+      if (typeof ZXing === 'undefined') {
+        showScannerStatus('error', '❌ Camera library load nahi hui. Refresh karein.');
+        return;
+      }
+
+      try {
+        statusEl.style.display = 'block';
+        statusEl.textContent = '📷 Camera start ho raha hai...';
+        container.style.display = 'block';
+        btn.innerHTML = '<i class="ti ti-camera-off"></i> Camera Band Karo';
+        btn.style.background = 'linear-gradient(135deg,#c0392b,#922b21)';
+        isCameraOn = true;
+
+        codeReader = new ZXing.BrowserMultiFormatReader();
+
+        const videoEl = document.getElementById('camera-video');
+
+        // Back camera prefer karo (mobile ke liye)
+        const constraints = {
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        };
+
+        cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+        videoEl.srcObject = cameraStream;
+        await videoEl.play();
+
+        statusEl.textContent = '🟢 Camera ready — barcode ko green box mein rakhein';
+
+        // Continuously scan frames
+        scanFrame();
+
+      } catch (err) {
+        let msg = '❌ Camera error: ' + err.message;
+        if (err.name === 'NotAllowedError') msg = '❌ Camera permission denied. Browser settings mein allow karein.';
+        if (err.name === 'NotFoundError') msg = '❌ Camera nahi mila device mein.';
+        showScannerStatus('error', msg);
+        statusEl.style.display = 'none';
+        container.style.display = 'none';
+        btn.innerHTML = '<i class="ti ti-camera"></i> 📱 Mobile Camera se Scan';
+        btn.style.background = 'linear-gradient(135deg,#16a663,#0c7c47)';
+        isCameraOn = false;
+      }
+    };
+
+    let lastScannedCode = '';
+    let lastScanTime = 0;
+
+    function scanFrame() {
+      if (!isCameraOn) return;
+
+      const video = document.getElementById('camera-video');
+      const canvas = document.getElementById('camera-canvas');
+      if (!video || !canvas || video.readyState < 2) {
+        requestAnimationFrame(scanFrame);
+        return;
+      }
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+
+      try {
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const hints = new Map();
+        const formats = [
+          ZXing.BarcodeFormat.QR_CODE,
+          ZXing.BarcodeFormat.CODE_128,
+          ZXing.BarcodeFormat.CODE_39,
+          ZXing.BarcodeFormat.EAN_13,
+          ZXing.BarcodeFormat.EAN_8,
+          ZXing.BarcodeFormat.UPC_A,
+          ZXing.BarcodeFormat.UPC_E,
+          ZXing.BarcodeFormat.DATA_MATRIX,
+          ZXing.BarcodeFormat.ITF,
+        ];
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+
+        const luminanceSource = new ZXing.RGBLuminanceSource(imageData.data, canvas.width, canvas.height);
+        const binaryBitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminanceSource));
+        const reader = new ZXing.MultiFormatReader();
+        reader.setHints(hints);
+        const result = reader.decode(binaryBitmap);
+
+        if (result) {
+          const code = result.getText();
+          const now = Date.now();
+          // Same code 2 second ke andar dobara na scan ho
+          if (code !== lastScannedCode || now - lastScanTime > 2000) {
+            lastScannedCode = code;
+            lastScanTime = now;
+            // Input mein set karo aur send karo
+            document.getElementById('scanner-input').value = code;
+            // Beep sound
+            playBeep();
+            // Auto send
+            sendBarcode();
+          }
         }
-        html += '</tr>';
+      } catch (e) {
+        // NotFoundException — normal, matlab frame mein barcode nahi mila
       }
-      html += '</tbody>';
-      grid.innerHTML = html;
 
-      ssUpdateTabBar();
-      ssUpdateFormulaBar();
+      requestAnimationFrame(scanFrame);
     }
 
-    function ssInRange(r,c,s,e) {
-      const r1=Math.min(s.r,e.r),r2=Math.max(s.r,e.r),c1=Math.min(s.c,e.c),c2=Math.max(s.c,e.c);
-      return r>=r1&&r<=r2&&c>=c1&&c<=c2;
-    }
+    window.stopCameraScanner = function() {
+      isCameraOn = false;
+      lastScannedCode = '';
 
-    function ssUpdateTabBar() {
-      const bar = document.getElementById('ss-tab-bar');
-      if (!bar) return;
-      bar.innerHTML = ssSheetOrder.map(name =>
-        '<button onclick="switchSheet(\''+name+'\')" style="padding:5px 14px;border:1px solid var(--line);border-bottom:none;border-radius:4px 4px 0 0;margin-right:2px;font-size:12px;font-weight:'+(name===ssActiveSheet?'700':'400')+';background:'+(name===ssActiveSheet?'#fff':'#f0f4f8')+';color:'+(name===ssActiveSheet?'var(--blue)':'var(--muted)')+';cursor:pointer;">'+name+'</button>'
-      ).join('');
-
-      const sel = document.getElementById('ss-sheet-select');
-      if (sel) {
-        sel.innerHTML = ssSheetOrder.map(n=>'<option value="'+n+'"'+(n===ssActiveSheet?' selected':'')+'>'+n+'</option>').join('');
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+        cameraStream = null;
       }
+
+      const video = document.getElementById('camera-video');
+      if (video) { video.srcObject = null; }
+
+      document.getElementById('camera-container').style.display = 'none';
+      document.getElementById('camera-status').style.display = 'none';
+
+      const btn = document.getElementById('camera-scan-btn');
+      if (btn) {
+        btn.innerHTML = '<i class="ti ti-camera"></i> 📱 Mobile Camera se Scan';
+        btn.style.background = 'linear-gradient(135deg,#16a663,#0c7c47)';
+      }
+    };
+
+    function playBeep() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 1200;
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.15);
+      } catch(e) {}
     }
 
-    function ssUpdateFormulaBar() {
-      const fbar = document.getElementById('ss-formula-bar');
-      const cref = document.getElementById('ss-cell-ref');
-      if (!ssSelectedCell) { if(fbar) fbar.value=''; if(cref) cref.textContent=''; return; }
-      const {r,c} = ssSelectedCell;
-      if (cref) cref.textContent = ssCellName(r,c);
-      if (fbar) fbar.value = ssCurrentBook().cells[ssCellKey(r,c)] || '';
-    }
-
-    // ── CELL INTERACTION ───────────────────────────────────────────────────
-    let mouseIsDown = false;
-    window.ssMouseDown = function(r,c,e) { mouseIsDown=true; ssSelStart={r,c}; ssSelEnd={r,c}; };
-    window.ssMouseMove = function(r,c,e) { if(mouseIsDown&&e.buttons){ssSelEnd={r,c};ssRender();} };
-    document.addEventListener('mouseup',()=>{mouseIsDown=false;});
-
-    window.ssClickCell = function(r,c,e) {
-      if (ssEditing) ssCommitEdit();
-      ssSelectedCell = {r,c};
-      if (!e.shiftKey) { ssSelStart={r,c}; ssSelEnd={r,c}; }
-      else ssSelEnd={r,c};
-      ssUpdateFormulaBar();
-      ssHighlightCell(r,c);
-    };
-
-    function ssHighlightCell(r,c) {
-      document.querySelectorAll('#ss-grid td[data-r]').forEach(td=>{
-        td.style.outline=''; td.style.background='';
-        const fmt = ssCurrentBook().formats[ssCellKey(+td.dataset.r,+td.dataset.c)]||{};
-        td.style.background = fmt.bgColor||'#fff';
-      });
-      const cell = document.querySelector('#ss-grid td[data-r="'+r+'"][data-c="'+c+'"]');
-      if(cell){cell.style.outline='2px solid var(--blue)';cell.style.outlineOffset='-1px';cell.style.background='#e8f0fe';}
-    }
-
-    window.ssSelectRow = function(r) {
-      ssSelStart={r,c:0}; ssSelEnd={r,c:COLS-1}; ssSelectedCell={r,c:0};
-      ssRender(); ssUpdateFormulaBar();
-    };
-    window.ssSelectCol = function(c) {
-      ssSelStart={r:0,c}; ssSelEnd={r:ROWS-1,c}; ssSelectedCell={r:0,c};
-      ssRender(); ssUpdateFormulaBar();
-    };
-
-    window.ssStartEdit = function(r,c) {
-      ssSelectedCell = {r,c};
-      const cell = document.querySelector('#ss-grid td[data-r="'+r+'"][data-c="'+c+'"]');
-      if (!cell) return;
-      ssEditing = true;
-      const raw = ssCurrentBook().cells[ssCellKey(r,c)]||'';
-      const input = document.createElement('input');
-      input.value = raw;
-      input.style.cssText='width:100%;height:100%;border:none;outline:none;background:transparent;font-size:inherit;font-family:inherit;padding:0;';
-      cell.textContent = '';
-      cell.appendChild(input);
-      input.focus(); input.select();
-      const fbar = document.getElementById('ss-formula-bar');
-      if(fbar) fbar.value = raw;
-
-      input.oninput = () => { if(fbar) fbar.value = input.value; };
-      input.onkeydown = (e) => {
-        if (e.key==='Enter') { ssCommitEdit(input.value, r, c); ssClickCell(r+1,c,{}); }
-        else if (e.key==='Escape') { ssEditing=false; ssRender(); }
-        else if (e.key==='Tab') { e.preventDefault(); ssCommitEdit(input.value,r,c); ssClickCell(r,c+1,{}); }
-      };
-    };
-
-    function ssCommitEdit(val, r, c) {
-      ssEditing = false;
-      if (r===undefined && ssSelectedCell) { r=ssSelectedCell.r; c=ssSelectedCell.c; }
-      if (r===undefined) return;
-      const input = document.querySelector('#ss-grid td[data-r="'+r+'"][data-c="'+c+'"] input');
-      const value = (val !== undefined) ? val : (input ? input.value : '');
-      const key = ssCellKey(r,c);
-      if (value === '') delete ssCurrentBook().cells[key];
-      else ssCurrentBook().cells[key] = value;
-      ssSave();
-      ssRender();
-      ssUpdateFormulaBar();
-    }
-
-    // ── FORMULA BAR ─────────────────────────────────────────────────────────
-    window.ssFormulaBarInput = function() {
-      const fbar = document.getElementById('ss-formula-bar');
-      if (!ssSelectedCell || !fbar) return;
-      const key = ssCellKey(ssSelectedCell.r, ssSelectedCell.c);
-      ssCurrentBook().cells[key] = fbar.value;
-    };
-    window.ssFormulaBarKeydown = function(e) {
-      if (e.key==='Enter') { ssCommitEdit(); ssRender(); }
-    };
-
-    // ── KEYBOARD NAVIGATION ─────────────────────────────────────────────────
+    // Physical scanner ke liye — page pe kahan bhi scan karo, input focus ho jaye
     document.addEventListener('keydown', function(e) {
-      if (!ssSelectedCell || !document.getElementById('page-spreadsheet').classList.contains('active')) return;
-      if (ssEditing) return;
-      const {r,c} = ssSelectedCell;
-      if (e.key==='ArrowRight') { ssClickCell(r,Math.min(c+1,COLS-1),{}); e.preventDefault(); }
-      else if (e.key==='ArrowLeft') { ssClickCell(r,Math.max(c-1,0),{}); e.preventDefault(); }
-      else if (e.key==='ArrowDown') { ssClickCell(Math.min(r+1,ROWS-1),c,{}); e.preventDefault(); }
-      else if (e.key==='ArrowUp') { ssClickCell(Math.max(r-1,0),c,{}); e.preventDefault(); }
-      else if (e.key==='Enter') { ssStartEdit(r,c); e.preventDefault(); }
-      else if (e.key==='Delete'||e.key==='Backspace') { ssClearCell(); e.preventDefault(); }
-      else if (e.key==='F2') { ssStartEdit(r,c); e.preventDefault(); }
-      else if ((e.ctrlKey||e.metaKey) && e.key==='b') { ssApplyFormat('bold'); e.preventDefault(); }
-      else if ((e.ctrlKey||e.metaKey) && e.key==='i') { ssApplyFormat('italic'); e.preventDefault(); }
-      else if ((e.ctrlKey||e.metaKey) && e.key==='u') { ssApplyFormat('underline'); e.preventDefault(); }
-      else if ((e.ctrlKey||e.metaKey) && e.key==='c') { ssCopySelection(); }
-      else if ((e.ctrlKey||e.metaKey) && e.key==='v') { ssPasteSelection(); }
-      else if (e.key.length===1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        ssStartEdit(r,c);
+      const activeEl = document.activeElement;
+      const isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT');
+      const scannerInput = document.getElementById('scanner-input');
+      if (!scannerInput) return;
+
+      // Sirf Google Sheet tab active hone pe aur koi aur input focused na ho
+      const spreadPage = document.getElementById('page-spreadreport');
+      if (!spreadPage || !spreadPage.classList.contains('active')) return;
+      if (isTyping && activeEl !== scannerInput) return;
+      if (!isTyping && e.key.length === 1) {
+        scannerInput.focus();
       }
     });
 
-    // ── COPY / PASTE ─────────────────────────────────────────────────────────
-    let ssCopied = null;
-    function ssCopySelection() {
-      if (!ssSelectedCell) return;
-      ssCopied = { raw: ssCurrentBook().cells[ssCellKey(ssSelectedCell.r,ssSelectedCell.c)]||'', r: ssSelectedCell.r, c: ssSelectedCell.c };
-    }
-    function ssPasteSelection() {
-      if (!ssSelectedCell || !ssCopied) return;
-      const key = ssCellKey(ssSelectedCell.r,ssSelectedCell.c);
-      ssCurrentBook().cells[key] = ssCopied.raw;
-      ssSave(); ssRender();
-    }
-
-    // ── FORMATTING ───────────────────────────────────────────────────────────
-    window.ssApplyFormat = function(type, val) {
-      const cells = ssGetSelectedRange();
-      cells.forEach(({r,c}) => {
-        const key = ssCellKey(r,c);
-        const book = ssCurrentBook();
-        if (!book.formats[key]) book.formats[key] = {};
-        const fmt = book.formats[key];
-        if (type==='bold') fmt.bold = !fmt.bold;
-        else if (type==='italic') fmt.italic = !fmt.italic;
-        else if (type==='underline') fmt.underline = !fmt.underline;
-        else if (type==='color') fmt.color = val;
-        else if (type==='bgColor') fmt.bgColor = val;
-        else if (type==='fontSize') fmt.fontSize = val;
-        else if (type==='alignLeft') fmt.align = 'left';
-        else if (type==='alignCenter') fmt.align = 'center';
-        else if (type==='alignRight') fmt.align = 'right';
-      });
-      ssSave(); ssRender();
-    };
-
-    window.ssClearFormat = function() {
-      const cells = ssGetSelectedRange();
-      cells.forEach(({r,c}) => { delete ssCurrentBook().formats[ssCellKey(r,c)]; });
-      ssSave(); ssRender();
-    };
-
-    window.ssClearCell = function() {
-      const cells = ssGetSelectedRange();
-      cells.forEach(({r,c}) => { delete ssCurrentBook().cells[ssCellKey(r,c)]; });
-      ssSave(); ssRender();
-    };
-
-    function ssGetSelectedRange() {
-      if (ssSelStart && ssSelEnd) {
-        const r1=Math.min(ssSelStart.r,ssSelEnd.r), r2=Math.max(ssSelStart.r,ssSelEnd.r);
-        const c1=Math.min(ssSelStart.c,ssSelEnd.c), c2=Math.max(ssSelStart.c,ssSelEnd.c);
-        const out = [];
-        for (let r=r1;r<=r2;r++) for (let c=c1;c<=c2;c++) out.push({r,c});
-        return out;
-      }
-      return ssSelectedCell ? [ssSelectedCell] : [];
-    }
-
-    // ── ADD / DELETE ROWS & COLS ─────────────────────────────────────────────
-    window.ssAddRow = function() {
-      const book = ssCurrentBook();
-      const maxRow = Object.keys(book.cells).reduce((m,k)=>Math.max(m,parseInt(k.split(',')[0])),ROWS-1);
-      // just extend, grid will show new row on re-render
-      ssRender();
-      if(typeof showToast==='function') showToast('success','Row add ho gayi!');
-    };
-
-    window.ssAddCol = function() {
-      ssRender();
-      if(typeof showToast==='function') showToast('success','Column add ho gaya!');
-    };
-
-    window.ssDeleteRow = function() {
-      if (!ssSelectedCell) return;
-      const r = ssSelectedCell.r;
-      const book = ssCurrentBook();
-      const newCells={}, newFmts={};
-      Object.entries(book.cells).forEach(([k,v])=>{
-        const [cr,cc]=k.split(',').map(Number);
-        if(cr<r){newCells[k]=v;} else if(cr>r){newCells[(cr-1)+','+cc]=v;}
-      });
-      Object.entries(book.formats).forEach(([k,v])=>{
-        const [cr,cc]=k.split(',').map(Number);
-        if(cr<r){newFmts[k]=v;} else if(cr>r){newFmts[(cr-1)+','+cc]=v;}
-      });
-      book.cells=newCells; book.formats=newFmts;
-      ssSave(); ssRender();
-    };
-
-    window.ssDeleteCol = function() {
-      if (!ssSelectedCell) return;
-      const c = ssSelectedCell.c;
-      const book = ssCurrentBook();
-      const newCells={}, newFmts={};
-      Object.entries(book.cells).forEach(([k,v])=>{
-        const [cr,cc]=k.split(',').map(Number);
-        if(cc<c){newCells[k]=v;} else if(cc>c){newCells[cr+','+(cc-1)]=v;}
-      });
-      Object.entries(book.formats).forEach(([k,v])=>{
-        const [cr,cc]=k.split(',').map(Number);
-        if(cc<c){newFmts[k]=v;} else if(cc>c){newFmts[cr+','+(cc-1)]=v;}
-      });
-      book.cells=newCells; book.formats=newFmts;
-      ssSave(); ssRender();
-    };
-
-    // ── FREEZE ROWS ──────────────────────────────────────────────────────────
-    window.ssFreezeRow = function() {
-      ssFrozenRows = ssFrozenRows > 0 ? 0 : 1;
-      document.getElementById('ss-freeze-btn').innerHTML = ssFrozenRows>0
-        ? '<i class="ti ti-lock-open"></i>Unfreeze' : '<i class="ti ti-lock"></i>Freeze Row';
-      ssRender();
-    };
-
-    // ── LOAD DATA FROM STORE ─────────────────────────────────────────────────
-    window.ssLoadData = function(type) {
-      const store = window._fbFns ? undefined : undefined; // will use global store
-      const s = window.store || (typeof store !== 'undefined' ? store : null);
-
-      let headers=[], rows=[];
-      if (type==='sales') {
-        headers=['Invoice No','Party','Date','Status','Subtotal','GST','Total'];
-        rows=(window.store||{sales:[]}).sales.map(inv=>{
-          const t=(window.calcTotals||function(){return{sub:0,gst:0,total:0};})(inv.items||[]);
-          return[inv.invoiceNo,inv.party,inv.date,inv.status,Math.round(t.sub),Math.round(t.gst),Math.round(t.total)];
-        });
-      } else if (type==='purchases') {
-        headers=['Bill No','Vendor','Date','Status','Subtotal','GST','Total'];
-        rows=(window.store||{purchases:[]}).purchases.map(inv=>{
-          const t=(window.calcTotals||function(){return{sub:0,gst:0,total:0};})(inv.items||[]);
-          return[inv.invoiceNo,inv.party,inv.date,inv.status,Math.round(t.sub),Math.round(t.gst),Math.round(t.total)];
-        });
-      } else if (type==='products') {
-        headers=['Product','Unit','Sale Price','Purchase Price','GST%','Stock'];
-        rows=(window.store||{products:[]}).products.map(p=>[p.name,p.unit||'pcs',p.salePrice||0,p.purchasePrice||0,p.gst||0,p.stock||0]);
-      }
-
-      // Create new sheet for data
-      const sheetName = type.charAt(0).toUpperCase()+type.slice(1)+'-Data';
-      if (!ssBooks[sheetName]) { ssBooks[sheetName]={cells:{},formats:{}}; ssSheetOrder.push(sheetName); }
-      ssActiveSheet = sheetName;
-      const book = ssCurrentBook();
-      book.cells={};
-
-      [headers, ...rows].forEach((row,r)=>{
-        row.forEach((val,c)=>{
-          if(val!==undefined&&val!=='') book.cells[ssCellKey(r,c)]=String(val);
-        });
-        if(r===0) { row.forEach((_,c)=>{ if(!book.formats[ssCellKey(0,c)])book.formats[ssCellKey(0,c)]={};
-          book.formats[ssCellKey(0,c)].bold=true; book.formats[ssCellKey(0,c)].bgColor='#dbeafe'; }); }
-      });
-
-      ssSave(); ssRender();
-      if(typeof showToast==='function') showToast('success', sheetName+' sheet mein data load ho gaya!');
-    };
-
-    // Expose store reference from module
-    setTimeout(()=>{ if(typeof window._fbLoadStore==='function' && !window.store) {} }, 1000);
-
-    // ── EXCEL EXPORT ─────────────────────────────────────────────────────────
-    window.ssDownloadExcel = function() {
-      if (!window.XLSX) { alert('XLSX library load nahi hua!'); return; }
-      const wb = XLSX.utils.book_new();
-      ssSheetOrder.forEach(name => {
-        const book = ssBooks[name]||{cells:{}};
-        const maxR = Object.keys(book.cells).reduce((m,k)=>Math.max(m,parseInt(k.split(',')[0])),0);
-        const maxC = Object.keys(book.cells).reduce((m,k)=>Math.max(m,parseInt(k.split(',')[1])),0);
-        const aoa=[];
-        for(let r=0;r<=maxR;r++){
-          const row=[];
-          for(let c=0;c<=maxC;c++){
-            const raw=book.cells[ssCellKey(r,c)]||'';
-            let val=raw.startsWith('=')?raw:raw;
-            if(!isNaN(val)&&val!=='')val=Number(val);
-            row.push(val);
-          }
-          aoa.push(row);
-        }
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), name.substring(0,31));
-      });
-      XLSX.writeFile(wb, 'billpro_spreadsheet.xlsx');
-      if(typeof showToast==='function') showToast('success','Excel download ho gaya!');
-    };
-
-    // ── EXCEL IMPORT ─────────────────────────────────────────────────────────
-    window.ssImportExcel = function() { document.getElementById('ss-import-file').click(); };
-
-    window.ssHandleImport = function(input) {
-      const file = input.files[0];
-      if (!file || !window.XLSX) return;
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        const wb = XLSX.read(e.target.result, {type:'binary'});
-        wb.SheetNames.forEach(name=>{
-          const ws = wb.Sheets[name];
-          const aoa = XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-          const safeN = name.replace(/[^a-zA-Z0-9 _-]/g,'');
-          if(!ssBooks[safeN]){ssBooks[safeN]={cells:{},formats:{}};ssSheetOrder.push(safeN);}
-          else ssBooks[safeN].cells={};
-          aoa.forEach((row,r)=>row.forEach((val,c)=>{
-            if(val!==undefined&&val!=='') ssBooks[safeN].cells[ssCellKey(r,c)]=String(val);
-          }));
-        });
-        ssActiveSheet = wb.SheetNames[0].replace(/[^a-zA-Z0-9 _-]/g,'')||ssSheetOrder[0];
-        ssSave(); ssRender();
-        if(typeof showToast==='function') showToast('success','Excel import ho gaya!');
-      };
-      reader.readAsBinaryString(file);
-      input.value='';
-    };
-
-    // Patch calcTotals for ssLoadData
-    window._calcTotals = function(items){ return typeof calcTotals==='function'?calcTotals(items):{sub:0,gst:0,total:0}; };
-
-  })();
   </script>
+
 
   <style>
     /* ── All styles remain exactly as before ── */
@@ -3148,6 +3449,13 @@
       box-sizing: border-box;
       margin: 0;
       padding: 0;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
     }
 
     body {
@@ -3279,7 +3587,9 @@
     .app {
       display: grid;
       grid-template-columns: 248px minmax(0, 1fr);
-      min-height: 100vh;
+      height: 100vh;
+      min-height: 0;
+      overflow: hidden;
       background:
         radial-gradient(circle at 35% 0%, rgba(22, 99, 166, .12), transparent 28%),
         linear-gradient(135deg, #edf5fb 0%, #f7fafc 48%, #eef8f2 100%);
@@ -3290,9 +3600,9 @@
       border-right: 1px solid rgba(22, 99, 166, .18);
       display: flex;
       flex-direction: column;
-      position: sticky;
-      top: 0;
       height: 100vh;
+      min-height: 0;
+      overflow: hidden;
       box-shadow: 12px 0 34px rgba(24, 34, 48, .05);
     }
 
@@ -3334,6 +3644,10 @@
 
     .nav {
       padding: 14px 12px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      flex: 1;
+      min-height: 0;
     }
 
     .nav-section {
@@ -3382,8 +3696,10 @@
 
     .main {
       min-width: 0;
+      min-height: 0;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
       background:
         linear-gradient(180deg, rgba(255, 255, 255, .64), rgba(255, 255, 255, 0) 180px),
         radial-gradient(circle at 90% 8%, rgba(184, 107, 18, .11), transparent 20%),
@@ -3399,8 +3715,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      position: sticky;
-      top: 0;
+      flex: 0 0 auto;
       z-index: 10;
     }
 
@@ -3442,7 +3757,11 @@
     .content {
       padding: 24px 28px 34px;
       width: min(1360px, 100%);
-      min-height: calc(100vh - 72px);
+      max-width: 100%;
+      min-height: 0;
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
 
     .page {
@@ -3874,6 +4193,175 @@
     .badge.cancelled {
       background: #fff0f0;
       color: var(--red);
+    }
+
+    .online-sheet-toolbar {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 10px 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: #fbfcfd;
+    }
+
+    .online-sheet-toolbar .btn.sm {
+      min-height: 32px;
+      padding: 5px 9px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .online-sheet-name {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 800;
+      color: var(--text);
+      margin-right: 4px;
+    }
+
+    .online-formula-wrap {
+      flex: 1;
+      min-width: 260px;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+    }
+
+    #online-active-cell {
+      min-width: 54px;
+      padding: 7px 10px;
+      border-right: 1px solid var(--line);
+      color: #1a73e8;
+      font-size: 12px;
+      font-weight: 800;
+      text-align: center;
+      background: #f4f8ff;
+    }
+
+    #online-formula-input {
+      width: 100%;
+      min-height: 34px;
+      border: 0;
+      outline: 0;
+      padding: 7px 10px;
+      font-size: 13px;
+      background: transparent;
+    }
+
+    .online-sheet-count {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .online-sheet-shell {
+      width: max-content;
+      min-width: 100%;
+      max-height: 65vh;
+      overflow: auto;
+      background: #fff;
+    }
+
+    .online-sheet-grid {
+      border-collapse: separate;
+      border-spacing: 0;
+      table-layout: fixed;
+      font-size: 13px;
+    }
+
+    .online-sheet-grid th,
+    .online-sheet-grid td {
+      border-right: 1px solid #dadce0;
+      border-bottom: 1px solid #dadce0;
+      padding: 0;
+    }
+
+    .online-sheet-grid thead th {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      height: 28px;
+      background: #f8fafd;
+      color: #3c4043;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+      user-select: none;
+    }
+
+    .online-sheet-grid .corner-cell,
+    .online-sheet-grid .row-head {
+      position: sticky;
+      left: 0;
+      z-index: 4;
+      min-width: 46px;
+      width: 46px;
+      background: #f8fafd;
+      color: #5f6368;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 700;
+      user-select: none;
+    }
+
+    .online-sheet-grid .corner-cell {
+      top: 0;
+      z-index: 5;
+    }
+
+    .online-sheet-grid td {
+      height: 30px;
+      background: #fff;
+    }
+
+    .online-sheet-grid input {
+      height: 30px;
+      border: 0;
+      outline: 0;
+      padding: 5px 7px;
+      font: inherit;
+      background: transparent;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .online-sheet-grid td.active-cell {
+      box-shadow: inset 0 0 0 2px #1a73e8;
+      position: relative;
+      z-index: 2;
+    }
+
+    .col-resize-handle {
+      position: absolute;
+      top: 0;
+      right: -3px;
+      width: 7px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 8;
+    }
+
+    .row-resize-handle {
+      position: absolute;
+      left: 0;
+      bottom: -3px;
+      width: 100%;
+      height: 7px;
+      cursor: row-resize;
+      z-index: 8;
+    }
+
+    .online-sheet-grid thead th:hover .col-resize-handle,
+    .online-sheet-grid .row-head:hover .row-resize-handle {
+      background: rgba(26, 115, 232, .18);
     }
 
     .modal-bg {
@@ -4856,11 +5344,13 @@
     @media (max-width: 980px) {
       .app {
         grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(0, 1fr);
       }
 
       .sidebar {
         position: static;
         height: auto;
+        max-height: 150px;
         border-right: 0;
         border-bottom: 1px solid rgba(22, 99, 166, .18);
       }
@@ -4873,6 +5363,8 @@
         display: flex;
         gap: 8px;
         overflow-x: auto;
+        overflow-y: hidden;
+        flex: 0 0 auto;
         padding: 10px 12px;
       }
 
@@ -5045,11 +5537,6 @@
       color: var(--red);
     }
   </style>
-  <link rel="stylesheet" href="https://unpkg.com/luckysheet/dist/plugins/css/pluginsCss.css">
-<link rel="stylesheet" href="https://unpkg.com/luckysheet/dist/plugins/plugins.css">
-<link rel="stylesheet" href="https://unpkg.com/luckysheet/dist/css/luckysheet.css">
-<script src="https://unpkg.com/luckysheet/dist/plugins/js/plugin.js"></script>
-<script src="https://unpkg.com/luckysheet/dist/luckysheet.umd.js"></script>
 </head>
 
 <body class="auth-locked">
@@ -5141,13 +5628,12 @@
             class="ti ti-shopping-cart"></i>Purchase Bill</button>
         <button class="nav-item" data-page="vendors" onclick="showPage('vendors',this)"><i
             class="ti ti-building-store"></i>Vendors</button>
-        <div class="nav-section">Tools</div>
-        <button class="nav-item" data-page="spreadsheet" onclick="showPage('spreadsheet',this)"><i
-            class="ti ti-table"></i>Spreadsheet</button>
         <div class="nav-section">Staff</div>
         <button class="nav-item" data-page="employees" onclick="handleEmployeesNavClick(this)"><i
             class="ti ti-users-group"></i>Employees <span id="emp-premium-badge" class="badge pending"
             style="margin-left: auto; font-size: 10px; padding: 2px 6px;">PREMIUM</span></button>
+        <div class="nav-section">Reports</div>
+        <button class="nav-item" data-page="spreadreport" onclick="showPage('spreadreport',this)" style="background:linear-gradient(135deg,#1a73e8,#0d47a1);color:#fff;font-weight:800;border-radius:8px;margin:4px 8px;width:calc(100% - 16px);"><i class="ti ti-table"></i>📊 Spreadsheet Report</button>
       </nav>
       <div class="employee-nav-section" id="sidebar-emp-section" style="display:none">
         <button class="exit-emp-btn" onclick="logoutEmployee()"
@@ -5220,71 +5706,6 @@
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- SPREADSHEET -->
-        <div class="page" id="page-spreadsheet">
-          <div class="toolbar" style="flex-wrap:wrap; gap:6px;">
-            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-              <select id="ss-sheet-select" onchange="switchSheet(this.value)" style="border:1px solid var(--line);border-radius:var(--radius);padding:6px 10px;font-size:13px;background:#fff;cursor:pointer;"></select>
-              <button class="btn sm primary" onclick="addNewSheet()" title="New Sheet"><i class="ti ti-plus"></i>New Sheet</button>
-              <button class="btn sm danger" onclick="deleteCurrentSheet()" title="Delete Sheet"><i class="ti ti-trash"></i>Delete</button>
-            </div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;">
-              <button class="btn sm" onclick="ssLoadData('sales')" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-file-invoice"></i>Sales Load</button>
-              <button class="btn sm" onclick="ssLoadData('purchases')" style="border-color:var(--amber,#f59e0b);color:#b45309;"><i class="ti ti-shopping-cart"></i>Purchase Load</button>
-              <button class="btn sm" onclick="ssLoadData('products')" style="border-color:var(--green);color:var(--green);"><i class="ti ti-box"></i>Products Load</button>
-              <button class="btn sm" onclick="ssDownloadExcel()" style="border-color:#1d6f42;color:#1d6f42;"><i class="ti ti-download"></i>Excel Download</button>
-              <button class="btn sm" onclick="ssImportExcel()" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-upload"></i>Excel Import</button>
-              <input type="file" id="ss-import-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="ssHandleImport(this)">
-              <a href="scanner.html" target="_blank" class="btn sm primary" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-color:#6366f1;text-decoration:none;"><i class="ti ti-qrcode"></i>&#128241; Scanner Kholein</a>
-            </div>
-          </div>
-
-          <!-- Formula Bar -->
-          <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);margin-bottom:6px;">
-            <div id="ss-cell-ref" style="min-width:60px;font-weight:700;font-size:13px;color:var(--blue);border:1px solid var(--line);border-radius:var(--radius);padding:4px 8px;background:#f7f9fb;">A1</div>
-            <span style="color:var(--muted);font-size:16px;">fx</span>
-            <input type="text" id="ss-formula-bar" placeholder="Value ya formula likho (=SUM(A1:A5))" style="flex:1;border:1px solid var(--line);border-radius:var(--radius);padding:6px 10px;font-size:13px;" oninput="ssFormulaBarInput()" onkeydown="ssFormulaBarKeydown(event)">
-          </div>
-
-          <!-- Formatting Toolbar -->
-          <div style="display:flex;align-items:center;gap:4px;padding:4px 0;border-bottom:1px solid var(--line);margin-bottom:6px;flex-wrap:wrap;">
-            <select id="ss-font-size" onchange="ssApplyFormat('fontSize',this.value)" style="border:1px solid var(--line);border-radius:var(--radius);padding:4px 6px;font-size:12px;width:55px;">
-              <option>11</option><option>12</option><option>14</option><option>16</option><option>18</option><option>20</option><option>24</option>
-            </select>
-            <button class="btn sm icon" onclick="ssApplyFormat('bold')" title="Bold (Ctrl+B)" style="font-weight:900;font-size:14px;">B</button>
-            <button class="btn sm icon" onclick="ssApplyFormat('italic')" title="Italic (Ctrl+I)" style="font-style:italic;font-size:14px;">I</button>
-            <button class="btn sm icon" onclick="ssApplyFormat('underline')" title="Underline (Ctrl+U)" style="text-decoration:underline;font-size:14px;">U</button>
-            <div style="width:1px;height:20px;background:var(--line);margin:0 2px;"></div>
-            <button class="btn sm icon" onclick="ssApplyFormat('alignLeft')" title="Align Left"><i class="ti ti-align-left"></i></button>
-            <button class="btn sm icon" onclick="ssApplyFormat('alignCenter')" title="Align Center"><i class="ti ti-align-center"></i></button>
-            <button class="btn sm icon" onclick="ssApplyFormat('alignRight')" title="Align Right"><i class="ti ti-align-right"></i></button>
-            <div style="width:1px;height:20px;background:var(--line);margin:0 2px;"></div>
-            <label title="Text Color" style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;">
-              <span style="font-size:13px;">A</span><input type="color" id="ss-text-color" value="#1a1a2e" onchange="ssApplyFormat('color',this.value)" style="width:22px;height:18px;border:none;cursor:pointer;padding:0;">
-            </label>
-            <label title="Fill Color" style="display:flex;align-items:center;gap:2px;font-size:11px;cursor:pointer;">
-              <i class="ti ti-paint"></i><input type="color" id="ss-bg-color" value="#ffffff" onchange="ssApplyFormat('bgColor',this.value)" style="width:22px;height:18px;border:none;cursor:pointer;padding:0;">
-            </label>
-            <div style="width:1px;height:20px;background:var(--line);margin:0 2px;"></div>
-            <button class="btn sm" onclick="ssAddRow()" title="Row Add"><i class="ti ti-row-insert-bottom"></i>Row</button>
-            <button class="btn sm" onclick="ssAddCol()" title="Column Add"><i class="ti ti-column-insert-right"></i>Col</button>
-            <button class="btn sm danger" onclick="ssDeleteRow()" title="Row Delete"><i class="ti ti-row-remove"></i></button>
-            <button class="btn sm danger" onclick="ssDeleteCol()" title="Col Delete"><i class="ti ti-column-remove"></i></button>
-            <div style="width:1px;height:20px;background:var(--line);margin:0 2px;"></div>
-            <button class="btn sm" onclick="ssFreezeRow()" title="Freeze/Unfreeze Top Row" id="ss-freeze-btn"><i class="ti ti-lock"></i>Freeze Row</button>
-            <button class="btn sm" onclick="ssClearFormat()" title="Clear Formatting"><i class="ti ti-clear-formatting"></i>Clear Format</button>
-            <button class="btn sm danger" onclick="ssClearCell()" title="Cell Clear"><i class="ti ti-eraser"></i>Clear</button>
-          </div>
-
-          <!-- Spreadsheet Grid -->
-          <div id="ss-grid-container" style="overflow:auto;max-height:calc(100vh - 340px);border:1px solid var(--line);border-radius:var(--radius);background:#fff;position:relative;">
-            <table id="ss-grid" style="border-collapse:collapse;table-layout:fixed;font-size:13px;min-width:100%;"></table>
-          </div>
-
-          <!-- Sheet Tabs at Bottom -->
-          <div style="display:flex;align-items:center;gap:0;border-top:2px solid var(--line);margin-top:6px;background:#f7f9fb;border-radius:0 0 var(--radius) var(--radius);padding:4px 8px;overflow-x:auto;" id="ss-tab-bar"></div>
         </div>
 
         <!-- SALES -->
@@ -5485,6 +5906,131 @@
                 <tbody id="employees-tbody"></tbody>
               </table>
             </div>
+          </div>
+        </div>
+
+        <!-- SPREADSHEET REPORT -->
+        <div class="page" id="page-spreadreport">
+          <div class="toolbar" style="flex-wrap:wrap;gap:8px;">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <button class="btn" id="ss-tab-sales" onclick="ssShowTab('sales')" style="background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:700;"><i class="ti ti-file-invoice"></i> Sales</button>
+              <button class="btn" id="ss-tab-purchase" onclick="ssShowTab('purchase')" style="font-weight:700;"><i class="ti ti-shopping-cart"></i> Purchase</button>
+              <button class="btn" id="ss-tab-returns" onclick="ssShowTab('returns')" style="font-weight:700;"><i class="ti ti-truck-return"></i> Customer Returns</button>
+              <button class="btn" id="ss-tab-summary" onclick="ssShowTab('summary')" style="font-weight:700;"><i class="ti ti-chart-bar"></i> Summary</button>
+              <button class="btn" id="ss-tab-online" onclick="ssShowTab('online')" style="font-weight:700;"><i class="ti ti-brand-google"></i> Google Sheet</button>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <input type="date" id="ss-date-from" onchange="ssRender()" style="border:1px solid var(--line);border-radius:var(--radius);padding:6px 10px;font-size:13px;" title="From Date">
+              <input type="date" id="ss-date-to" onchange="ssRender()" style="border:1px solid var(--line);border-radius:var(--radius);padding:6px 10px;font-size:13px;" title="To Date">
+              <button class="btn" onclick="ssClearDates()" style="font-size:12px;">✕ Clear Filter</button>
+              <button class="btn primary" onclick="ssExportExcel()" style="background:var(--green);border-color:var(--green);"><i class="ti ti-download"></i> Excel Export</button>
+            </div>
+          </div>
+          <!-- Summary Cards -->
+          <div id="ss-summary-cards" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;"></div>
+
+          <!-- Main layout: Scanner (left) + Sheet (right) -->
+          <div style="display:flex;gap:16px;align-items:flex-start;">
+
+            <!-- ── BARCODE SCANNER PANEL (hidden) ── -->
+            <div class="card" style="width:280px;min-width:260px;flex-shrink:0;padding:0;overflow:hidden;display:none;">
+              <!-- Header -->
+              <div style="background:linear-gradient(135deg,#1663a6,#0c477c);padding:14px 16px;display:flex;align-items:center;gap:8px;">
+                <i class="ti ti-barcode" style="color:#fff;font-size:20px;"></i>
+                <span style="color:#fff;font-weight:800;font-size:15px;">Barcode Scanner</span>
+              </div>
+              <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+
+                <!-- Camera Scanner -->
+                <div>
+                  <button onclick="toggleCameraScanner()" id="camera-scan-btn"
+                    style="width:100%;padding:11px;background:linear-gradient(135deg,#16a663,#0c7c47);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+                    <i class="ti ti-camera"></i> 📱 Mobile Camera se Scan
+                  </button>
+                  <!-- Camera preview -->
+                  <div id="camera-container" style="display:none;margin-top:10px;position:relative;border-radius:10px;overflow:hidden;background:#000;">
+                    <video id="camera-video" style="width:100%;border-radius:10px;display:block;" autoplay muted playsinline></video>
+                    <canvas id="camera-canvas" style="display:none;"></canvas>
+                    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:70%;height:40%;border:3px solid #00ff88;border-radius:8px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,0.35);"></div>
+                    <div style="position:absolute;bottom:8px;left:0;right:0;text-align:center;">
+                      <span style="background:rgba(0,0,0,0.6);color:#fff;font-size:11px;padding:4px 10px;border-radius:20px;">Barcode ko green box mein rakhein</span>
+                    </div>
+                    <button onclick="stopCameraScanner()" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:30px;height:30px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button>
+                  </div>
+                  <div id="camera-status" style="display:none;margin-top:6px;font-size:12px;color:var(--muted);text-align:center;"></div>
+                </div>
+
+                <!-- Divider -->
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <div style="flex:1;height:1px;background:var(--line);"></div>
+                  <span style="font-size:11px;color:var(--muted);font-weight:600;">YA MANUALLY</span>
+                  <div style="flex:1;height:1px;background:var(--line);"></div>
+                </div>
+
+                <!-- Scan input -->
+                <div>
+                  <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:6px;">Barcode / Code</label>
+                  <div style="display:flex;gap:6px;">
+                    <input type="text" id="scanner-input"
+                      placeholder="Scan ya type karein..."
+                      style="flex:1;border:2px solid var(--blue);border-radius:8px;padding:9px 10px;font-size:14px;font-weight:600;outline:none;"
+                      onkeydown="if(event.key==='Enter') sendBarcode()"
+                      autofocus>
+                  </div>
+                  <p style="font-size:11px;color:var(--muted);margin-top:5px;">💡 Physical scanner se scan karo ya type karke Enter dabao</p>
+                </div>
+
+                <!-- Quantity -->
+                <div>
+                  <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:6px;">Quantity</label>
+                  <input type="number" id="scanner-qty" value="1" min="1"
+                    style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;font-weight:600;">
+                </div>
+
+                <!-- Send button -->
+                <button onclick="sendBarcode()" id="scanner-send-btn"
+                  style="width:100%;padding:11px;background:linear-gradient(135deg,#1663a6,#0c477c);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+                  <i class="ti ti-send"></i> Google Sheet mein Send
+                </button>
+
+                <!-- Status message -->
+                <div id="scanner-status" style="display:none;padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;"></div>
+
+                <!-- Auto-focus toggle -->
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);cursor:pointer;">
+                  <input type="checkbox" id="scanner-autofocus" checked onchange="toggleScannerAutofocus()">
+                  Auto-focus (har scan ke baad input clear ho)
+                </label>
+
+                <!-- Scan log -->
+                <div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                    <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Recent Scans</label>
+                    <button onclick="clearScanLog()" style="font-size:11px;color:var(--muted);background:none;border:none;cursor:pointer;">Clear</button>
+                  </div>
+                  <div id="scan-log" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;">
+                    <p style="font-size:12px;color:var(--muted);text-align:center;padding:12px 0;">Abhi koi scan nahi hua</p>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- ── GOOGLE SHEET / TABLE ── -->
+            <div style="flex:1;min-width:0;">
+              <!-- Scanner Button — sheet ke upar -->
+              <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;">
+                <button onclick="openScannerPopup()"
+                  style="display:inline-flex;align-items:center;gap:7px;padding:9px 18px;background:linear-gradient(135deg,#1663a6,#0c477c);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(22,99,166,0.3);">
+                  <i class="ti ti-barcode" style="font-size:18px;"></i> Scan Barcode
+                </button>
+                <span style="font-size:12px;color:var(--muted);">📱 Camera se scan karein aur sheet mein save ho</span>
+              </div>
+              <div class="card" style="overflow:auto;">
+                <div id="ss-table-container" style="min-width:0;"></div>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -5774,7 +6320,279 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toast-container"></div>
 
+  <!-- ── SCANNER POPUP MODAL ── -->
+  <div id="sp-modal-bg"
+    onclick="if(event.target===this)closeScannerPopup()"
+    style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.5);align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:16px;width:340px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.25);animation:spIn 0.18s ease;">
+      <!-- Header -->
+      <div style="background:linear-gradient(135deg,#1663a6,#0c477c);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-radius:16px 16px 0 0;position:sticky;top:0;z-index:1;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <i class="ti ti-barcode" style="color:#fff;font-size:20px;"></i>
+          <span style="color:#fff;font-weight:800;font-size:15px;">Barcode Scanner</span>
+        </div>
+        <button onclick="closeScannerPopup()" style="background:rgba(255,255,255,0.2);border:none;color:#fff;border-radius:50%;width:30px;height:30px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>
+      </div>
 
+      <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+
+        <!-- Camera Button -->
+        <button onclick="spToggleCamera()" id="sp-camera-btn"
+          style="width:100%;padding:12px;background:linear-gradient(135deg,#16a663,#0c7c47);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+          <i class="ti ti-camera"></i> 📱 Mobile Camera se Scan Karo
+        </button>
+
+        <!-- Camera Preview -->
+        <div id="sp-camera-container" style="display:none;position:relative;border-radius:10px;overflow:hidden;background:#000;">
+          <video id="sp-video" style="width:100%;display:block;border-radius:10px;" autoplay muted playsinline></video>
+          <canvas id="sp-canvas" style="display:none;"></canvas>
+          <!-- Green scan box -->
+          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:72%;height:38%;border:3px solid #00ff88;border-radius:8px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,0.38);"></div>
+          <div style="position:absolute;bottom:8px;left:0;right:0;text-align:center;">
+            <span style="background:rgba(0,0,0,0.6);color:#fff;font-size:11px;padding:4px 12px;border-radius:20px;">Barcode ko green box mein rakhein</span>
+          </div>
+          <button onclick="spStopCamera()" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:32px;height:32px;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button>
+        </div>
+        <div id="sp-camera-status" style="display:none;font-size:12px;color:var(--muted);text-align:center;margin-top:-6px;"></div>
+
+        <!-- Divider -->
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="flex:1;height:1px;background:var(--line);"></div>
+          <span style="font-size:11px;color:var(--muted);font-weight:600;">YA MANUALLY TYPE KARO</span>
+          <div style="flex:1;height:1px;background:var(--line);"></div>
+        </div>
+
+        <!-- Barcode Input -->
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:6px;">Barcode / Code</label>
+          <input type="text" id="sp-input"
+            placeholder="Scan ya type karein..."
+            style="width:100%;border:2px solid #1663a6;border-radius:8px;padding:10px 12px;font-size:15px;font-weight:600;outline:none;box-sizing:border-box;"
+            onkeydown="if(event.key==='Enter')spSend()">
+          <p style="font-size:11px;color:var(--muted);margin-top:5px;">💡 Physical scanner se scan karo ya Enter dabao</p>
+        </div>
+
+        <!-- Quantity -->
+        <div>
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:6px;">Quantity</label>
+          <input type="number" id="sp-qty" value="1" min="1"
+            style="width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:14px;font-weight:600;box-sizing:border-box;">
+        </div>
+
+        <!-- Send Button -->
+        <button onclick="spSend()"
+          style="width:100%;padding:12px;background:linear-gradient(135deg,#1663a6,#0c477c);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+          <i class="ti ti-send"></i> Sheet mein Send Karo
+        </button>
+
+        <!-- Status -->
+        <div id="sp-status" style="display:none;padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;"></div>
+
+        <!-- Auto-focus -->
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);cursor:pointer;">
+          <input type="checkbox" id="sp-autofocus" checked>
+          Auto-clear (har scan ke baad input khali ho)
+        </label>
+
+        <!-- Scan Log -->
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Recent Scans</label>
+            <button onclick="spClearLog()" style="font-size:11px;color:var(--muted);background:none;border:none;cursor:pointer;">Clear</button>
+          </div>
+          <div id="sp-log" style="max-height:150px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;">
+            <p style="font-size:12px;color:var(--muted);text-align:center;padding:10px 0;">Abhi koi scan nahi hua</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <style>
+    @keyframes spIn {
+      from { opacity:0; transform:scale(0.94) translateY(16px); }
+      to   { opacity:1; transform:scale(1) translateY(0); }
+    }
+  </style>
+
+  <script>
+    // ── Scanner Popup Logic ──────────────────────────────────────
+    var spStream = null;
+    var spScanLogEntries = [];
+    var spLastCode = '';
+    var spLastTime = 0;
+
+    function openScannerPopup() {
+      var bg = document.getElementById('sp-modal-bg');
+      bg.style.display = 'flex';
+      setTimeout(function(){ var i = document.getElementById('sp-input'); if(i) i.focus(); }, 150);
+    }
+
+    function closeScannerPopup() {
+      spStopCamera();
+      document.getElementById('sp-modal-bg').style.display = 'none';
+    }
+
+    document.addEventListener('keydown', function(e){
+      if(e.key === 'Escape'){
+        var bg = document.getElementById('sp-modal-bg');
+        if(bg && bg.style.display !== 'none') closeScannerPopup();
+      }
+    });
+
+    async function spToggleCamera() {
+      var container = document.getElementById('sp-camera-container');
+      if (spStream) { spStopCamera(); return; }
+      var btn = document.getElementById('sp-camera-btn');
+      var statusEl = document.getElementById('sp-camera-status');
+      btn.innerHTML = '<i class="ti ti-loader"></i> Camera shuru ho raha hai...';
+      btn.disabled = true;
+      statusEl.style.display = 'block';
+      statusEl.textContent = '⏳ Camera permission maang raha hai...';
+      try {
+        var constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
+        spStream = await navigator.mediaDevices.getUserMedia(constraints);
+        var video = document.getElementById('sp-video');
+        video.srcObject = spStream;
+        await video.play();
+        container.style.display = 'block';
+        statusEl.textContent = '🟢 Camera ready — barcode ko green box mein rakhein';
+        btn.innerHTML = '<i class="ti ti-camera-off"></i> Camera Band Karo';
+        btn.style.background = 'linear-gradient(135deg,#e53e3e,#c53030)';
+        btn.disabled = false;
+        spScanFrame();
+      } catch(err) {
+        statusEl.textContent = '❌ Camera nahi khula: ' + err.message;
+        btn.innerHTML = '<i class="ti ti-camera"></i> 📱 Mobile Camera se Scan Karo';
+        btn.disabled = false;
+      }
+    }
+
+    function spStopCamera() {
+      if (spStream) { spStream.getTracks().forEach(function(t){ t.stop(); }); spStream = null; }
+      var video = document.getElementById('sp-video');
+      if (video) { video.srcObject = null; }
+      var container = document.getElementById('sp-camera-container');
+      if (container) container.style.display = 'none';
+      var statusEl = document.getElementById('sp-camera-status');
+      if (statusEl) statusEl.style.display = 'none';
+      var btn = document.getElementById('sp-camera-btn');
+      if (btn) {
+        btn.innerHTML = '<i class="ti ti-camera"></i> 📱 Mobile Camera se Scan Karo';
+        btn.style.background = 'linear-gradient(135deg,#16a663,#0c7c47)';
+        btn.disabled = false;
+      }
+    }
+
+    function spScanFrame() {
+      if (!spStream) return;
+      var video = document.getElementById('sp-video');
+      var canvas = document.getElementById('sp-canvas');
+      if (!video || !canvas || video.readyState < 2) { requestAnimationFrame(spScanFrame); return; }
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      var ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+      try {
+        var hints = new Map();
+        var ZXing = window.ZXing;
+        if (!ZXing) { requestAnimationFrame(spScanFrame); return; }
+        var reader = new ZXing.BrowserMultiFormatReader();
+        var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        var luminance = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+        var binaryBitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminance));
+        try {
+          var result = reader.decodeBitmap(binaryBitmap);
+          if (result && result.getText()) {
+            var code = result.getText();
+            var now = Date.now();
+            if (code !== spLastCode || (now - spLastTime) > 2000) {
+              spLastCode = code;
+              spLastTime = now;
+              document.getElementById('sp-input').value = code;
+              spSend();
+            }
+          }
+        } catch(e) { /* no barcode in frame */ }
+      } catch(e) {}
+      if (spStream) requestAnimationFrame(spScanFrame);
+    }
+
+    async function spSend() {
+      var input = document.getElementById('sp-input');
+      var qtyEl = document.getElementById('sp-qty');
+      var statusEl = document.getElementById('sp-status');
+      var barcode = input.value.trim();
+      if (!barcode) {
+        statusEl.style.display = 'block';
+        statusEl.style.background = '#fff3cd';
+        statusEl.style.color = '#856404';
+        statusEl.textContent = '⚠️ Pehle barcode scan ya type karo!';
+        return;
+      }
+      var qty = parseInt(qtyEl.value) || 1;
+      var datetime = new Date().toLocaleString('en-IN');
+
+      // sendBarcode function use karo (original logic se)
+      if (window.sendBarcode) {
+        // original inputs temporarily set karo
+        var origInput = document.getElementById('scanner-input');
+        var origQty = document.getElementById('scanner-qty');
+        if (origInput) origInput.value = barcode;
+        if (origQty) origQty.value = qty;
+        await window.sendBarcode();
+      } else {
+        // Direct Firebase send
+        try {
+          if (window._fbDb && window._fbFns) {
+            var { addDoc, collection } = window._fbFns;
+            await addDoc(collection(window._fbDb, 'scan_sessions'), {
+              value: barcode,
+              quantity: qty,
+              datetime: datetime,
+              sheet: (window.ssSheetOrder && window.ssSheetOrder[0]) || 'Sheet1',
+              col: 0
+            });
+          }
+        } catch(e) { console.warn('Send error:', e); }
+      }
+
+      statusEl.style.display = 'block';
+      statusEl.style.background = '#d4edda';
+      statusEl.style.color = '#155724';
+      statusEl.textContent = '✅ Bheja: ' + barcode + ' (Qty: ' + qty + ')';
+      spAddLog(barcode, qty, datetime);
+
+      if (document.getElementById('sp-autofocus').checked) {
+        input.value = '';
+        qtyEl.value = 1;
+        input.focus();
+      }
+      setTimeout(function(){ statusEl.style.display = 'none'; }, 3000);
+    }
+
+    function spAddLog(barcode, qty, datetime) {
+      spScanLogEntries.unshift({ barcode, qty, datetime });
+      if (spScanLogEntries.length > 20) spScanLogEntries.pop();
+      var logEl = document.getElementById('sp-log');
+      if (!spScanLogEntries.length) {
+        logEl.innerHTML = '<p style="font-size:12px;color:var(--muted);text-align:center;padding:10px 0;">Abhi koi scan nahi hua</p>';
+        return;
+      }
+      logEl.innerHTML = spScanLogEntries.map(function(e){
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:#f7f9fb;border-radius:6px;">' +
+          '<div style="font-size:13px;font-weight:700;color:var(--text);">' + e.barcode + '</div>' +
+          '<div style="font-size:11px;color:var(--muted);">Qty: ' + e.qty + '</div>' +
+          '</div>';
+      }).join('');
+    }
+
+    function spClearLog() {
+      spScanLogEntries.length = 0;
+      document.getElementById('sp-log').innerHTML = '<p style="font-size:12px;color:var(--muted);text-align:center;padding:10px 0;">Abhi koi scan nahi hua</p>';
+    }
+  </script>
 
 </body>
 </html>
