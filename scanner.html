@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>Barcode Scanner</title>
+  <!-- ZXing only as fallback -->
   <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: #0f1923;
@@ -16,7 +16,6 @@
       display: flex;
       flex-direction: column;
     }
-
     .header {
       background: linear-gradient(135deg, #1663a6, #0c477c);
       padding: 14px 18px;
@@ -29,7 +28,6 @@
     .header h1 { font-size: 17px; font-weight: 800; }
     .header p  { font-size: 11px; opacity: 0.75; margin-top: 2px; }
 
-    /* Camera area */
     .camera-wrap {
       position: relative;
       width: 100%;
@@ -70,8 +68,17 @@
       font-size: 12px;
       color: rgba(255,255,255,0.85);
     }
-
-    /* Confirm overlay — shown when barcode found */
+    .engine-badge {
+      position: absolute;
+      top: 8px;
+      right: 10px;
+      font-size: 10px;
+      background: rgba(0,0,0,0.5);
+      color: #00ff88;
+      padding: 3px 8px;
+      border-radius: 20px;
+      font-weight: 700;
+    }
     .confirm-overlay {
       display: none;
       position: absolute;
@@ -95,16 +102,8 @@
       word-break: break-all;
       max-width: 90%;
     }
-    .confirm-label {
-      font-size: 13px;
-      color: rgba(255,255,255,0.8);
-      margin-top: -6px;
-    }
-    .confirm-btns {
-      display: flex;
-      gap: 12px;
-      margin-top: 4px;
-    }
+    .confirm-label { font-size: 13px; color: rgba(255,255,255,0.8); margin-top: -6px; }
+    .confirm-btns { display: flex; gap: 12px; margin-top: 4px; }
     .btn-ok {
       padding: 14px 32px;
       background: #00cc66;
@@ -129,8 +128,6 @@
       cursor: pointer;
     }
     .btn-retry:active { opacity: 0.8; }
-
-    /* Bottom panel */
     .panel {
       flex: 1;
       background: #fff;
@@ -143,7 +140,6 @@
       position: relative;
       z-index: 2;
     }
-
     .btn-camera {
       width: 100%;
       padding: 14px;
@@ -161,7 +157,6 @@
     }
     .btn-camera:active { opacity: 0.85; }
     .btn-camera.off { background: linear-gradient(135deg, #e53e3e, #c53030); }
-
     .status-pill {
       display: none;
       text-align: center;
@@ -174,7 +169,6 @@
     .status-pill.error   { background: #f8d7da; color: #721c24; }
     .status-pill.warn    { background: #fff3cd; color: #856404; }
     .status-pill.sending { background: #cce5ff; color: #004085; }
-
     .divider {
       display: flex;
       align-items: center;
@@ -189,7 +183,6 @@
       height: 1px;
       background: #e0e0e0;
     }
-
     label.field-label {
       font-size: 11px;
       font-weight: 700;
@@ -199,7 +192,6 @@
       display: block;
       margin-bottom: 6px;
     }
-
     input[type="text"], input[type="number"] {
       width: 100%;
       border: 2px solid #1663a6;
@@ -212,7 +204,6 @@
       background: #f7f9fb;
     }
     input[type="number"] { border-color: #ddd; }
-
     .btn-send {
       width: 100%;
       padding: 14px;
@@ -230,7 +221,6 @@
     }
     .btn-send:active  { opacity: 0.85; }
     .btn-send:disabled { opacity: 0.5; }
-
     .log-header {
       display: flex;
       justify-content: space-between;
@@ -259,7 +249,6 @@
     .log-barcode { font-size: 14px; font-weight: 700; color: #222; }
     .log-meta    { font-size: 11px; color: #888; }
     .log-empty   { font-size: 13px; color: #bbb; text-align: center; padding: 14px 0; }
-
     canvas { display: none; }
   </style>
 </head>
@@ -273,18 +262,14 @@
     </div>
   </div>
 
-  <!-- Camera area -->
   <div class="camera-wrap" id="camera-wrap" style="display:none;">
     <video id="video" autoplay muted playsinline></video>
     <canvas id="canvas"></canvas>
-
-    <!-- Green scan box -->
     <div class="scan-overlay">
       <div class="scan-box" id="scan-box"></div>
     </div>
     <div class="scan-hint" id="scan-hint">📷 Barcode ko green box mein rakhein</div>
-
-    <!-- Confirm overlay (appears after scan) -->
+    <div class="engine-badge" id="engine-badge">⚡ Native</div>
     <div class="confirm-overlay" id="confirm-overlay">
       <div class="confirm-label">✅ Barcode mila!</div>
       <div class="confirm-code" id="confirm-code">—</div>
@@ -295,32 +280,24 @@
     </div>
   </div>
 
-  <!-- Bottom panel -->
   <div class="panel">
-
     <button class="btn-camera" id="camera-btn" onclick="toggleCamera()">
       📷 Camera Kholo aur Scan Karo
     </button>
-
     <div class="status-pill" id="status-pill"></div>
-
     <div class="divider">YA MANUALLY TYPE KARO</div>
-
     <div>
       <label class="field-label">Barcode</label>
       <input type="text" id="barcode-input" placeholder="Yahan type ya scan karo..."
         onkeydown="if(event.key==='Enter') sendManual()">
     </div>
-
     <div>
       <label class="field-label">Quantity</label>
       <input type="number" id="qty-input" value="1" min="1">
     </div>
-
     <button class="btn-send" id="send-btn" onclick="sendManual()">
       📤 Google Sheet mein Send Karo
     </button>
-
     <div>
       <div class="log-header">
         <span>Recent Scans</span>
@@ -330,17 +307,52 @@
         <p class="log-empty">Abhi koi scan nahi hua</p>
       </div>
     </div>
-
   </div>
 
   <script>
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzpwcg2U04A9yw2FnU8RJEwTevslXAHcbKaGBVMk6u-lUhIm3Lv4hJ-oY5dUQwF9XWc/exec';
 
     let stream      = null;
-    let scanning    = false;   // true = actively reading frames
-    let waitingOK   = false;   // true = barcode found, waiting for user OK
+    let scanning    = false;
+    let waitingOK   = false;
     let pendingCode = '';
+    let animFrameId = null;
     const logEntries = [];
+
+    // ── Engine Detection ───────────────────────────────
+    // Native BarcodeDetector = Chrome Android 9+, Samsung Browser — BAHUT FAST
+    // ZXing = fallback for older browsers
+    const useNative = ('BarcodeDetector' in window);
+    let nativeDetector = null;
+    let zxingReader    = null;
+
+    async function initDetector() {
+      if (useNative) {
+        // Native browser API — device ke GPU/neural chip use karta hai
+        nativeDetector = new BarcodeDetector({
+          formats: [
+            'ean_13','ean_8','code_128','code_39',
+            'qr_code','upc_a','upc_e','data_matrix','itf','codabar'
+          ]
+        });
+        document.getElementById('engine-badge').textContent = '⚡ Native Fast';
+        document.getElementById('engine-badge').style.color = '#00ff88';
+      } else {
+        // ZXing fallback
+        const ZXing = window.ZXing;
+        const hints = new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+          ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+          ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+          ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.UPC_A,
+          ZXing.BarcodeFormat.UPC_E, ZXing.BarcodeFormat.DATA_MATRIX,
+        ]);
+        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+        zxingReader = new ZXing.BrowserMultiFormatReader(hints);
+        document.getElementById('engine-badge').textContent = '🔄 ZXing';
+        document.getElementById('engine-badge').style.color = '#ffcc00';
+      }
+    }
 
     // ── Camera Toggle ──────────────────────────────────
     async function toggleCamera() {
@@ -351,8 +363,13 @@
       btn.disabled = true;
 
       try {
+        await initDetector();
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }
+          video: {
+            facingMode: { ideal: 'environment' },
+            width:  { ideal: 1280 },
+            height: { ideal: 720 }
+          }
         });
         const video = document.getElementById('video');
         video.srcObject = stream;
@@ -372,6 +389,7 @@
     function stopCamera() {
       scanning  = false;
       waitingOK = false;
+      if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
       if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
       document.getElementById('video').srcObject = null;
       document.getElementById('camera-wrap').style.display = 'none';
@@ -384,22 +402,49 @@
     }
 
     function startScanning() {
-      scanning  = true;
-      waitingOK = false;
+      scanning    = true;
+      waitingOK   = false;
       pendingCode = '';
       document.getElementById('confirm-overlay').classList.remove('show');
       document.getElementById('scan-box').classList.remove('found');
       document.getElementById('scan-hint').style.display = 'block';
-      scanFrame();
+
+      if (useNative) {
+        scanNative(); // requestAnimationFrame loop — 60fps native
+      } else {
+        scanZXing();  // setTimeout loop — 80ms
+      }
     }
 
-    // ── Frame-by-frame barcode read ────────────────────
-    function scanFrame() {
+    // ══════════════════════════════════════════════════
+    // METHOD 1: Native BarcodeDetector (Chrome Android)
+    // Yeh BAHUT fast hai — GPU level processing
+    // ══════════════════════════════════════════════════
+    async function scanNative() {
+      if (!scanning || waitingOK || !stream) return;
+      const video = document.getElementById('video');
+      if (video.readyState < 2) { animFrameId = requestAnimationFrame(scanNative); return; }
+
+      try {
+        const barcodes = await nativeDetector.detect(video); // direct video feed!
+        if (barcodes.length > 0) {
+          onBarcodeFound(barcodes[0].rawValue);
+          return;
+        }
+      } catch(e) {}
+
+      animFrameId = requestAnimationFrame(scanNative);
+    }
+
+    // ══════════════════════════════════════════════════
+    // METHOD 2: ZXing Fallback (older browsers)
+    // ══════════════════════════════════════════════════
+    function scanZXing() {
       if (!scanning || waitingOK || !stream) return;
 
       const video  = document.getElementById('video');
       const canvas = document.getElementById('canvas');
-      if (video.readyState < 2) { requestAnimationFrame(scanFrame); return; }
+      if (video.readyState < 2) { setTimeout(scanZXing, 100); return; }
 
       canvas.width  = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -408,66 +453,52 @@
 
       try {
         const ZXing  = window.ZXing;
-        const reader = new ZXing.BrowserMultiFormatReader();
         const lum    = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
         const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
         try {
-          const result = reader.decodeBitmap(bitmap);
+          const result = zxingReader.decodeBitmap(bitmap);
           if (result && result.getText()) {
-            const code = result.getText();
-            onBarcodeFound(code);
-            return; // stop loop — wait for OK
+            onBarcodeFound(result.getText());
+            return;
           }
-        } catch(e) { /* no barcode yet */ }
+        } catch(e) {}
       } catch(e) {}
 
-      requestAnimationFrame(scanFrame);
+      setTimeout(scanZXing, 80);
     }
 
-    // ── Barcode detected — pause & show confirm ────────
+    // ── Barcode Found ──────────────────────────────────
     function onBarcodeFound(code) {
       waitingOK   = true;
       pendingCode = code;
-
       if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
-
       document.getElementById('scan-box').classList.add('found');
       document.getElementById('scan-hint').style.display = 'none';
       document.getElementById('confirm-code').textContent = code;
       document.getElementById('confirm-overlay').classList.add('show');
-
-      // Also fill manual input so user can see/edit
       document.getElementById('barcode-input').value = code;
     }
 
-    // ── User pressed OK ────────────────────────────────
+    // ── OK Button ──────────────────────────────────────
     async function confirmAndSend() {
       const code = pendingCode;
       const qty  = parseInt(document.getElementById('qty-input').value) || 1;
       if (!code) return;
-
-      // Hide confirm overlay
       document.getElementById('confirm-overlay').classList.remove('show');
       showStatus('sending', '⏳ Sheet mein bhej raha hai...');
-
       await doSend(code, qty);
-
-      // Resume camera for next scan
       startScanning();
     }
 
-    // ── User pressed Retry ─────────────────────────────
     function retryCamera() {
       document.getElementById('barcode-input').value = '';
       startScanning();
     }
 
-    // ── Manual send (type + button) ────────────────────
     async function sendManual() {
       const code = document.getElementById('barcode-input').value.trim();
       const qty  = parseInt(document.getElementById('qty-input').value) || 1;
       if (!code) { showStatus('warn', '⚠️ Pehle barcode type karo!'); return; }
-
       const btn = document.getElementById('send-btn');
       btn.disabled = true;
       showStatus('sending', '⏳ Bhej raha hai...');
@@ -477,7 +508,6 @@
       btn.disabled = false;
     }
 
-    // ── Core send function ─────────────────────────────
     async function doSend(barcode, qty) {
       const datetime = new Date().toLocaleString('en-IN', {
         day: '2-digit', month: '2-digit', year: 'numeric',
@@ -497,7 +527,6 @@
       }
     }
 
-    // ── Status ─────────────────────────────────────────
     let stTimer = null;
     function showStatus(type, msg) {
       const pill = document.getElementById('status-pill');
@@ -505,21 +534,15 @@
       pill.textContent = msg;
       pill.style.display = 'block';
       clearTimeout(stTimer);
-      if (type !== 'sending') {
-        stTimer = setTimeout(() => { pill.style.display = 'none'; }, 3500);
-      }
+      if (type !== 'sending') stTimer = setTimeout(() => { pill.style.display = 'none'; }, 3500);
     }
 
-    // ── Log ────────────────────────────────────────────
     function addLog(barcode, qty) {
       logEntries.unshift({ barcode, qty });
       if (logEntries.length > 30) logEntries.pop();
       renderLog();
     }
-    function clearLog() {
-      logEntries.length = 0;
-      renderLog();
-    }
+    function clearLog() { logEntries.length = 0; renderLog(); }
     function renderLog() {
       const el = document.getElementById('log-list');
       if (!logEntries.length) {
@@ -537,6 +560,5 @@
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
   </script>
-
 </body>
 </html>
