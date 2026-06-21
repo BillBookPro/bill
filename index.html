@@ -4,11 +4,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1663a6">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="BillPro">
   <title>BillPro</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
 
   <script type="module">
     // ─── FIREBASE IMPORTS ────────────────────────────────────────────────────────
@@ -84,9 +87,13 @@
     let activeLedgerCustomer = '';
     let activeInvoice = null;
     let currentUser = null;
+    let currentEmployeeUsername = '';
+    let manualAdminLoginAllowed = false;
+    let pendingEmployeeSession = null;
     let authMode = 'login';
     let isEmployeeMode = false;
     const employeeAllowedPages = ['sales', 'purchase', 'returns'];
+    const visibleEmployeePasswords = new Set();
 
     let returnFilterType = 'all';
     let returnFilterPlatform = 'all';
@@ -102,11 +109,18 @@
       employees: [],
       adminEmail: '',
       _seeded: false,
-      business: { name: 'ADIXION', address: 'Your Address, City, State — 000000', gstin: '00AAAAA0000A1Z0', phone: '+91 00000 00000', email: 'info@adixion.com' }
+      business: { name: 'Your Company Name', tagline: 'Business Invoice', address: 'Your Address, City, State - 000000', gstin: '', stateCode: '', phone: '', email: '' }
     };
 
     let store = structuredClone(defaultStore);
     let invoiceCounters = { sale: 1, purchase: 1 };
+
+    function normalizeBusinessProfile() {
+      store.business = { ...structuredClone(defaultStore.business), ...(store.business || {}) };
+      if (String(store.business.name || '').trim().toUpperCase() === ['A','D','I','X','I','O','N'].join('')) {
+        store.business = structuredClone(defaultStore.business);
+      }
+    }
 
     // ─── HELPER: HASH PASSWORD (SHA-256) ──────────────────────────────────────
     async function hashPassword(password) {
@@ -136,11 +150,14 @@
             employees: Array.isArray(parsed.employees) ? parsed.employees : [],
             adminEmail: parsed.adminEmail || '',
             _seeded: parsed._seeded || false,
-            business: parsed.business || structuredClone(defaultStore.business)
+            business: { ...structuredClone(defaultStore.business), ...(parsed.business || {}) }
           };
+          normalizeBusinessProfile();
           // Spreadsheet data Firebase se load karke IIFE ko do
           if (parsed.spreadsheetData && window._ssSetLoadData) {
             window._ssSetLoadData(parsed.spreadsheetData);
+          } else if (window._ssResetLoadData) {
+            window._ssResetLoadData();
           }
           if (!store._seeded) {
             seedDemoData();
@@ -149,6 +166,8 @@
           }
         } else {
           store = structuredClone(defaultStore);
+          normalizeBusinessProfile();
+          if (window._ssResetLoadData) window._ssResetLoadData();
           store._seeded = false;
           seedDemoData();
           store._seeded = true;
@@ -157,6 +176,8 @@
       } catch (e) {
         console.warn('Firebase load error:', e);
         store = structuredClone(defaultStore);
+        normalizeBusinessProfile();
+        if (window._ssResetLoadData) window._ssResetLoadData();
         store._seeded = false;
         seedDemoData();
         store._seeded = true;
@@ -190,60 +211,6 @@
       }
     }
 
-    // ─── SCAN LISTENER ───────────────────────────────────────────────────────
-    let scanListenerUnsub = null;
-
-    function startScanListener() {
-      if (scanListenerUnsub) { scanListenerUnsub(); scanListenerUnsub = null; }
-      if (!currentUser || !window._fbDb || !window._fbFns) return;
-
-      const { collection, onSnapshot, query, where, deleteDoc, doc } = window._fbFns;
-      const db = window._fbDb;
-      const q = query(collection(db, 'scan_sessions'));
-
-      scanListenerUnsub = onSnapshot(q, (snap) => {
-        snap.docChanges().forEach(async (change) => {
-          if (change.type === 'added') {
-            const data = change.doc.data();
-            if (!data.value) return;
-
-            const value = String(data.value);
-            const sheetName = data.sheet || (window.ssSheetOrder && window.ssSheetOrder[0]) || 'Sheet1';
-            const col = parseInt(data.col) || 0;
-
-            // ssBooks mein write karo
-            if (window.ssBooks) {
-              if (!window.ssBooks[sheetName]) {
-                window.ssBooks[sheetName] = { cells: {}, formats: {} };
-                if (window.ssSheetOrder && !window.ssSheetOrder.includes(sheetName)) {
-                  window.ssSheetOrder.push(sheetName);
-                }
-              }
-              const book = window.ssBooks[sheetName];
-              // Us column ki next empty row dhundo
-              const usedRows = Object.keys(book.cells)
-                .filter(k => parseInt(k.split(',')[1]) === col)
-                .map(k => parseInt(k.split(',')[0]));
-              const nextRow = usedRows.length > 0 ? Math.max(...usedRows) + 1 : 0;
-              book.cells[nextRow + ',' + col] = value;
-
-              // Spreadsheet refresh karo
-              const evt = new CustomEvent('ss-refresh');
-              document.dispatchEvent(evt);
-
-              // Firebase mein save karo
-              if (window._fbSaveSpreadsheet) window._fbSaveSpreadsheet();
-
-              showToast('success', '📱 Scan aaya: ' + value);
-            }
-
-            // Firestore se doc delete karo (cleanup)
-            try { await deleteDoc(doc(db, 'scan_sessions', change.doc.id)); } catch(e) {}
-          }
-        });
-      });
-    }
-
     async function saveData() {
       window.store = store; // expose for spreadsheet access
       if (!currentUser || !window._fbDb) {
@@ -271,7 +238,7 @@
       if (!entered) return false;
 
       if (isEmployeeMode) {
-        const empUsername = localStorage.getItem('emp_session_username');
+        const empUsername = currentEmployeeUsername;
         if (!empUsername || !store.employees) return false;
         const employee = store.employees.find(e => e.username.toLowerCase() === empUsername.toLowerCase());
         if (employee) {
@@ -318,13 +285,21 @@
       document.getElementById('auth-pass').style.display = isForgot ? 'none' : 'block';
     }
 
+    function handleAuthEnter(event) {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      document.getElementById('auth-main-btn')?.click();
+    }
+
     async function createAccount() {
       const email = document.getElementById('auth-email').value.trim().toLowerCase();
       const password = document.getElementById('auth-pass').value;
       if (!email || !password) { alert('Email aur password daalein'); return; }
       try {
+        manualAdminLoginAllowed = true;
         await window._fbFns.createUserWithEmailAndPassword(window._fbAuth, email, password);
       } catch (e) {
+        manualAdminLoginAllowed = false;
         const msgs = { 'auth/email-already-in-use': 'Ye email pehle se registered hai.',
           'auth/weak-password': 'Password 6+ characters ka hona chahiye.',
           'auth/invalid-email': 'Email sahi format mein daalein.' };
@@ -337,8 +312,10 @@
       const password = document.getElementById('auth-pass').value;
       if (!email || !password) { alert('Email aur password daalein'); return; }
       try {
+        manualAdminLoginAllowed = true;
         await window._fbFns.signInWithEmailAndPassword(window._fbAuth, email, password);
       } catch (e) {
+        manualAdminLoginAllowed = false;
         const msgs = { 'auth/user-not-found': 'Ye email registered nahi hai.', 'auth/wrong-password': 'Password galat hai.',
           'auth/invalid-credential': 'Email ya password galat hai.',
           'auth/too-many-requests': 'Zyada attempts. Thodi der baad try karein.' };
@@ -357,9 +334,10 @@
     }
 
     async function logout() {
-      if (localStorage.getItem('emp_session_admin_uid')) {
+      if (isEmployeeMode) {
         logoutEmployee();
       } else {
+        manualAdminLoginAllowed = false;
         await window._fbFns.signOut(window._fbAuth);
       }
     }
@@ -383,13 +361,14 @@
 
       const passwordHash = await hashPassword(p1);
 
-      store.employees.push({ username, passwordHash, status: 'active' });
+      store.employees.push({ username, passwordHash, passwordPlain: p1, status: 'active' });
 
       try {
         await addDoc(getEmployeesCollection(), {
           adminUid: currentUser,
           username: username,
           passwordHash: passwordHash,
+          passwordPlain: p1,
           status: 'active'
         });
       } catch (e) {
@@ -409,12 +388,13 @@
       if (!await verifyActionPassword('Delete Employee')) return;
 
       const emp = store.employees[idx];
-      const currentEmp = localStorage.getItem('emp_session_username');
+      const currentEmp = currentEmployeeUsername;
       if (emp.username === currentEmp) {
         logoutEmployee();
       }
 
       store.employees.splice(idx, 1);
+      visibleEmployeePasswords.clear();
       try {
         const q = query(getEmployeesCollection(), where('adminUid', '==', currentUser), where('username', '==', emp.username));
         const snap = await getDocs(q);
@@ -455,11 +435,16 @@
         snap.forEach(docSnap => {
           const data = docSnap.data();
           if (data.passwordHash === hash) {
+            if ((data.status || 'active') !== 'active') {
+              found = true;
+              alert('Ye employee account inactive hai. Admin se contact karein.');
+              return;
+            }
             found = true;
             const adminUid = data.adminUid;
-            localStorage.setItem('emp_session_admin_uid', adminUid);
-            localStorage.setItem('emp_session_username', data.username);
-            loadEmployeeSession();
+            pendingEmployeeSession = { adminUid, username: data.username };
+            document.getElementById('auth-pass').value = '';
+            loadEmployeeSession(pendingEmployeeSession);
           }
         });
 
@@ -474,14 +459,23 @@
       }
     }
 
-    async function loadEmployeeSession() {
-      currentUser = localStorage.getItem('emp_session_admin_uid');
-      const empUser = localStorage.getItem('emp_session_username');
+    async function loadEmployeeSession(session) {
+      if (!session || !session.adminUid || !session.username) return;
+      currentUser = session.adminUid;
+      const empUser = session.username;
+      currentEmployeeUsername = empUser;
       isEmployeeMode = true;
 
       await window._fbLoadStore();
       invoiceCounters = loadInvoiceCounters();
       window._fbCurrentEmail = store.adminEmail || '';
+
+      const currentEmployee = (store.employees || []).find(e => e.username && e.username.toLowerCase() === String(empUser || '').toLowerCase());
+      if (!currentEmployee || (currentEmployee.status || 'active') !== 'active') {
+        alert('Ye employee account inactive hai. Admin se contact karein.');
+        logoutEmployee();
+        return;
+      }
 
       document.body.classList.remove('auth-locked');
       document.body.classList.add('employee-mode');
@@ -508,18 +502,22 @@
     function logoutEmployee() {
       localStorage.removeItem('emp_session_admin_uid');
       localStorage.removeItem('emp_session_username');
+      pendingEmployeeSession = null;
+      currentEmployeeUsername = '';
       isEmployeeMode = false;
       window.location.reload();
     }
 
     // ─── AUTH STATE OBSERVER ──────────────────────────────────────────────────
     onAuthStateChanged(auth, async (user) => {
-      if (localStorage.getItem('emp_session_admin_uid')) {
-        await loadEmployeeSession();
-        return;
-      }
+      localStorage.removeItem('emp_session_admin_uid');
+      localStorage.removeItem('emp_session_username');
 
       if (user) {
+        if (!manualAdminLoginAllowed) {
+          await window._fbFns.signOut(window._fbAuth);
+          return;
+        }
         currentUser = user.uid;
         window._fbCurrentUser = user.uid;  // expose for spreadsheet script
         window._fbCurrentEmail = user.email;
@@ -532,14 +530,13 @@
               { spreadsheetData: window._ssGetSaveData() }, { merge: true });
           } catch(e) { console.warn('SS Firebase save error:', e); }
         };
-        // Scanner listener - Firebase se scan data receive karo
-        startScanListener();
         await window._fbLoadStore();
         if (!store.adminEmail || store.adminEmail !== user.email) {
           store.adminEmail = user.email;
           saveData();
         }
         invoiceCounters = loadInvoiceCounters();
+        document.getElementById('auth-pass').value = '';
         document.body.classList.remove('auth-locked');
         document.getElementById('current-user-label').textContent = user.email;
         window.store = store; // expose for spreadsheet
@@ -552,6 +549,7 @@
         window._fbCurrentUser = null;
         window._fbCurrentEmail = null;
         store = structuredClone(defaultStore);
+        if (window._ssResetLoadData) window._ssResetLoadData();
         invoiceCounters = { sale: 1, purchase: 1 };
         document.body.classList.add('auth-locked');
         setAuthMode('login');
@@ -576,16 +574,96 @@
         price = parseFloat(i.price) || 0,
         gst = parseFloat(i.gst) || 0;
       const sub = qty * price;
-      return { sub, tax: sub * gst / 100, total: sub * (1 + gst / 100) };
+      return { sub, taxable: sub, tax: sub * gst / 100, total: sub * (1 + gst / 100), gstRate: gst };
     }
 
-    function calcTotals(items) {
+    function gstStateCodeFromGSTIN(gstin) {
+      const value = String(gstin || '').trim().toUpperCase();
+      return /^\d{2}[A-Z0-9]{13}$/.test(value) ? value.slice(0, 2) : '';
+    }
+
+    function isValidGSTIN(gstin) {
+      const value = String(gstin || '').trim().toUpperCase();
+      return !value || /^\d{2}[A-Z0-9]{13}$/.test(value);
+    }
+
+    function getBusinessStateCode() {
+      const biz = store.business || defaultStore.business;
+      return biz.stateCode || gstStateCodeFromGSTIN(biz.gstin) || '09';
+    }
+
+    function getPartyRecord(type, partyName) {
+      const list = type === 'purchase' || type === 'purchases' ? store.vendors : store.customers;
+      return (list || []).find(p => p.name === partyName) || {};
+    }
+
+    function resolveGstTaxType(type, partyName, savedGst) {
+      if (savedGst && (savedGst.taxType === 'interstate' || savedGst.taxType === 'intrastate')) return savedGst.taxType;
+      const party = getPartyRecord(type, partyName);
+      const sellerState = getBusinessStateCode();
+      const partyState = party.stateCode || gstStateCodeFromGSTIN(party.gstin);
+      return partyState && sellerState && partyState !== sellerState ? 'interstate' : 'intrastate';
+    }
+
+    function buildGstBreakup(items, taxType = 'intrastate') {
+      const rows = {};
+      items.forEach(item => {
+        const c = calcItem(item);
+        const rate = parseFloat(item.gst) || 0;
+        const key = String(rate);
+        if (!rows[key]) rows[key] = { rate, taxable: 0, cgst: 0, sgst: 0, igst: 0, totalTax: 0 };
+        rows[key].taxable += c.taxable;
+        rows[key].totalTax += c.tax;
+        if (taxType === 'interstate') rows[key].igst += c.tax;
+        else {
+          rows[key].cgst += c.tax / 2;
+          rows[key].sgst += c.tax / 2;
+        }
+      });
+      return Object.values(rows).sort((a, b) => a.rate - b.rate);
+    }
+
+    function classifyGstInvoice(inv, party, type = 'sale') {
+      const gstin = party.gstin || inv.gst?.buyerGstin || '';
+      if (type === 'purchase') return 'ITC';
+      return gstin ? 'B2B' : 'B2C';
+    }
+
+    function collectHsnSummary(source = 'sales') {
+      const rows = {};
+      const invoices = source === 'purchase' ? (store.purchases || []) : (store.sales || []);
+      invoices.forEach(inv => {
+        const taxType = resolveGstTaxType(source === 'purchase' ? 'purchase' : 'sale', inv.party, inv.gst);
+        (inv.items || []).forEach(item => {
+          const c = calcItem(item);
+          const hsn = String(item.hsn || '').trim() || 'NA';
+          const unit = item.unit || 'pcs';
+          const key = `${hsn}|${unit}|${item.gst || 0}|${taxType}`;
+          if (!rows[key]) rows[key] = { hsn, unit, gst: parseFloat(item.gst) || 0, taxType, qty: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, totalTax: 0 };
+          rows[key].qty += parseFloat(item.qty) || 0;
+          rows[key].taxable += c.taxable;
+          rows[key].totalTax += c.tax;
+          if (taxType === 'interstate') rows[key].igst += c.tax;
+          else {
+            rows[key].cgst += c.tax / 2;
+            rows[key].sgst += c.tax / 2;
+          }
+        });
+      });
+      return Object.values(rows).sort((a, b) => String(a.hsn).localeCompare(String(b.hsn)));
+    }
+
+    function calcTotals(items, taxType = 'intrastate') {
       let s = 0,
         g = 0;
       items.forEach(i => { const c = calcItem(i);
         s += c.sub;
         g += c.tax; });
-      return { sub: s, gst: g, total: s + g };
+      const breakup = buildGstBreakup(items, taxType);
+      const cgst = breakup.reduce((a, r) => a + r.cgst, 0);
+      const sgst = breakup.reduce((a, r) => a + r.sgst, 0);
+      const igst = breakup.reduce((a, r) => a + r.igst, 0);
+      return { sub: s, taxable: s, gst: g, cgst, sgst, igst, total: s + g, taxType, breakup };
     }
 
     function fmt(n) { return '₹' + Math.round(n).toLocaleString('en-IN'); }
@@ -616,12 +694,13 @@
       el.classList.add('active');
       const titles = { dashboard: 'Dashboard', sales: 'Sale Invoices', purchase: 'Purchase Bills',
         customers: 'Customers', products: 'Products', vendors: 'Vendors', employees: 'Employees',
-        returns: 'Returns Management', spreadreport: '📊 Spreadsheet Report' };
+        returns: 'Returns Management', business: 'Business Profile', spreadreport: 'Spreadsheet Report' };
       const subtitles = { dashboard: 'Business ka quick snapshot', sales: 'Customer invoices manage karein',
         purchase: 'Vendor bills track karein', customers: 'Customer directory',
         products: 'Product master aur rate list', vendors: 'Vendor directory',
         employees: 'Manage and monitor employees',
         returns: 'Meesho, Amazon, Flipkart, Myntra, Flex return pipeline',
+        business: 'Apni company details invoice par set karein',
         spreadreport: 'Sales, Purchase aur Returns ka full report — date filter ke saath' };
       document.getElementById('page-title').textContent = titles[id] || id;
       document.getElementById('page-subtitle').textContent = subtitles[id] || '';
@@ -632,6 +711,7 @@
       if (id === 'products') renderProducts();
       if (id === 'vendors') renderParties('vendors');
       if (id === 'employees') renderEmployees();
+      if (id === 'business') renderBusinessProfile();
       if (id === 'returns') renderReturns();
       if (id === 'spreadreport') { ssCurrentTab = ssCurrentTab || 'sales'; ssRender(); }
     }
@@ -641,11 +721,15 @@
     let ssOnlineRows = 80;
     let ssOnlineCols = 26;
     let ssOnlineActive = { row: 0, col: 0 };
-    let ssOnlineState = {
-      order: ['Online Sheet'],
-      activeSheet: 'Online Sheet',
-      sheets: { 'Online Sheet': { cells: {}, formats: {} } }
-    };
+    function ssCreateDefaultState() {
+      return {
+        order: ['My Sheet'],
+        activeSheet: 'My Sheet',
+        sheets: { 'My Sheet': { cells: {}, formats: {} } }
+      };
+    }
+
+    let ssOnlineState = ssCreateDefaultState();
 
     window.ssBooks = ssOnlineState.sheets;
     window.ssSheetOrder = ssOnlineState.order;
@@ -659,6 +743,14 @@
         n = Math.floor((n - 1) / 26);
       }
       return name;
+    }
+
+    function ssEscapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
     }
 
     function ssOnlineBook() {
@@ -712,6 +804,14 @@
       document.dispatchEvent(new CustomEvent('ss-refresh'));
     };
 
+    window._ssResetLoadData = function() {
+      ssOnlineState = ssCreateDefaultState();
+      ssOnlineActive = { row: 0, col: 0 };
+      window.ssBooks = ssOnlineState.sheets;
+      window.ssSheetOrder = ssOnlineState.order;
+      document.dispatchEvent(new CustomEvent('ss-refresh'));
+    };
+
     function ssShowTab(tab) {
       ssCurrentTab = tab;
       ['sales','purchase','returns','summary','online'].forEach(t => {
@@ -739,23 +839,67 @@
       const cardsEl = document.getElementById('ss-summary-cards');
       if (!container) return;
 
-      // Hide date filter & export toolbar items (not relevant for Google Sheet)
+      const sheetName = ssEscapeHtml(ssOnlineState.activeSheet || 'My Sheet');
+      const filledCells = Object.keys(ssOnlineBook().cells || {}).length;
+      const ownerLabel = ssEscapeHtml(window._fbCurrentEmail || 'Current Login');
+
       cardsEl.innerHTML = `
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#e8f0fe;border:1px solid #c5d5f8;border-radius:8px;width:100%;">
-          <i class="ti ti-brand-google" style="color:#1a73e8;font-size:18px;"></i>
-          <span style="font-size:13px;color:#174ea6;font-weight:600;">Google Sheet — saare formulas live kaam karenge. Sheet mein changes seedha save honge.</span>
-          <a href="https://docs.google.com/spreadsheets/d/1WVKiUnIKsXYfinFa9JFALUie7PYoiVnT9CB0p-RlYMU/edit" target="_blank" class="btn sm" style="margin-left:auto;background:#1a73e8;color:#fff;border-color:#1a73e8;text-decoration:none;">
-            <i class="ti ti-external-link"></i> Full Screen
-          </a>
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#eaf7f1;border:1px solid #bde8d1;border-radius:8px;width:100%;flex-wrap:wrap;">
+          <i class="ti ti-lock-check" style="color:#11845b;font-size:18px;"></i>
+          <span style="font-size:13px;color:#0f5f43;font-weight:700;">Private Sheet: ${ownerLabel}</span>
+          <span class="online-sheet-count">${filledCells} cells saved</span>
         </div>`;
 
+      const headers = Array.from({ length: ssOnlineCols }, (_, col) => `
+        <th data-col="${col}" style="width:${ssOnlineColWidth(col)}px;min-width:${ssOnlineColWidth(col)}px;">
+          ${ssColumnName(col)}
+          <span class="col-resize-handle" onmousedown="ssStartColumnResize(event, ${col})"></span>
+        </th>`).join('');
+
+      const rows = Array.from({ length: ssOnlineRows }, (_, row) => {
+        const cells = Array.from({ length: ssOnlineCols }, (_, col) => {
+          const value = ssEscapeHtml(ssOnlineCellValue(row, col));
+          const active = ssOnlineActive.row === row && ssOnlineActive.col === col ? ' active-cell' : '';
+          return `
+            <td class="${active}" style="width:${ssOnlineColWidth(col)}px;min-width:${ssOnlineColWidth(col)}px;height:${ssOnlineRowHeight(row)}px;">
+              <input
+                value="${value}"
+                data-row="${row}"
+                data-col="${col}"
+                style="width:${ssOnlineColWidth(col)}px;height:${ssOnlineRowHeight(row)}px;"
+                onfocus="ssSetOnlineActive(${row}, ${col}, this.value)"
+                oninput="ssEditOnlineCell(this)"
+                onpaste="ssPasteOnlineCells(event, this)">
+            </td>`;
+        }).join('');
+
+        return `
+          <tr>
+            <th class="row-head" style="height:${ssOnlineRowHeight(row)}px;">
+              ${row + 1}
+              <span class="row-resize-handle" onmousedown="ssStartRowResize(event, ${row})"></span>
+            </th>
+            ${cells}
+          </tr>`;
+      }).join('');
+
       container.innerHTML = `
-        <div style="width:100%;height:75vh;border-radius:8px;overflow:hidden;border:1px solid var(--line);">
-          <iframe
-            src="https://docs.google.com/spreadsheets/d/1WVKiUnIKsXYfinFa9JFALUie7PYoiVnT9CB0p-RlYMU/edit?usp=sharing&rm=minimal&embedded=true"
-            style="width:100%;height:100%;border:none;"
-            allowfullscreen>
-          </iframe>
+        <div class="online-sheet-toolbar">
+          <div class="online-sheet-name"><i class="ti ti-table"></i>${sheetName}</div>
+          <div class="online-formula-bar">
+            <span id="online-active-cell">${ssColumnName(ssOnlineActive.col)}${ssOnlineActive.row + 1}</span>
+            <input id="online-formula-input" value="${ssEscapeHtml(ssOnlineCellValue(ssOnlineActive.row, ssOnlineActive.col))}" oninput="ssUpdateActiveCell(this.value)">
+          </div>
+          <button class="btn sm" onclick="ssAddOnlineRow()"><i class="ti ti-row-insert-bottom"></i>Rows</button>
+          <button class="btn sm" onclick="ssAddOnlineColumn()"><i class="ti ti-column-insert-right"></i>Columns</button>
+          <button class="btn sm" onclick="ssFitOnlineColumn()"><i class="ti ti-arrows-horizontal"></i>Fit</button>
+          <button class="btn sm danger" onclick="ssClearOnlineSheet()"><i class="ti ti-trash"></i>Clear</button>
+        </div>
+        <div class="online-sheet-shell">
+          <table class="online-sheet-grid">
+            <thead><tr><th class="corner-cell"></th>${headers}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
         </div>`;
     }
 
@@ -1180,10 +1324,19 @@
       let sheetName = 'Report';
 
       if (ssCurrentTab === 'online') {
-        // Google Sheet tab pe click kiya - seedha Google Sheet open karo download ke liye
-        window.open('https://docs.google.com/spreadsheets/d/1WVKiUnIKsXYfinFa9JFALUie7PYoiVnT9CB0p-RlYMU/export?format=xlsx', '_blank');
-        showToast('success', 'Google Sheet download ho rahi hai!');
-        return;
+        sheetName = ssOnlineState.activeSheet || 'My Sheet';
+        sheetData = [];
+        for (let r = 0; r < ssOnlineRows; r++) {
+          const row = [];
+          let hasValue = false;
+          for (let c = 0; c < ssOnlineCols; c++) {
+            const value = ssOnlineCellValue(r, c);
+            row.push(value);
+            if (value !== '') hasValue = true;
+          }
+          if (hasValue) sheetData.push(row);
+        }
+        if (!sheetData.length) sheetData = [['']];
       } else if (ssCurrentTab === 'sales') {
         sheetName = 'Sales Report';
         sheetData = [['#','Invoice No','Customer','Date','Items','Subtotal','GST','Total','Status']];
@@ -1244,10 +1397,20 @@
           <div class="stat-card purchase"><div class="stat-top"><span class="stat-label">Total Purchases</span><i class="ti ti-package-import"></i></div><div class="stat-val amber">${fmt(pTotal)}</div></div>
           <div class="stat-card collected"><div class="stat-top"><span class="stat-label">Collected</span><i class="ti ti-circle-check"></i></div><div class="stat-val green">${fmt(paid)}</div></div>
           <div class="stat-card returns-stat"><div class="stat-top"><span class="stat-label">Total Returns</span><i class="ti ti-truck-return"></i></div><div class="stat-val orange">${returnCount} Orders</div></div>`;
-      document.querySelector('#dash-sales-table tbody').innerHTML = store.sales.slice(-3).reverse().map(s =>
+      const recentSales = [...store.sales].sort((a, b) => {
+        const dateA = new Date((a.date || '') + 'T00:00:00').getTime() || 0;
+        const dateB = new Date((b.date || '') + 'T00:00:00').getTime() || 0;
+        return dateB - dateA;
+      }).slice(0, 3);
+      const recentPurchases = [...store.purchases].sort((a, b) => {
+        const dateA = new Date((a.date || '') + 'T00:00:00').getTime() || 0;
+        const dateB = new Date((b.date || '') + 'T00:00:00').getTime() || 0;
+        return dateB - dateA;
+      }).slice(0, 3);
+      document.querySelector('#dash-sales-table tbody').innerHTML = recentSales.map(s =>
         `<tr><td>${s.party}</td><td class="cell-strong">${fmt(calcTotals(s.items).total)}</td><td>${badge(s.status)}</td></tr>`
         ).join('');
-      document.querySelector('#dash-purchase-table tbody').innerHTML = store.purchases.slice(-3).reverse().map(p =>
+      document.querySelector('#dash-purchase-table tbody').innerHTML = recentPurchases.map(p =>
         `<tr><td>${p.party}</td><td class="cell-strong">${fmt(calcTotals(p.items).total)}</td><td>${badge(p.status)}</td></tr>`
         ).join('');
     }
@@ -1257,17 +1420,23 @@
       const tbody = document.getElementById(type === 'sales' ? 'sales-tbody' : 'purchase-tbody');
       if (!data.length) { tbody.innerHTML =
           `<tr><td colspan="${type === 'sales' ? 9 : 8}" class="empty">Koi entry nahi. Naya ${type === 'sales' ? 'Invoice' : 'Bill'} banayein.</td></tr>`; return; }
-      tbody.innerHTML = data.map((r, i) => {
+      const sortedRows = data.map((r, index) => ({ r, index })).sort((a, b) => {
+        const dateA = new Date((a.r.date || '') + 'T00:00:00').getTime() || 0;
+        const dateB = new Date((b.r.date || '') + 'T00:00:00').getTime() || 0;
+        if (dateB !== dateA) return dateB - dateA;
+        return b.index - a.index;
+      });
+      tbody.innerHTML = sortedRows.map(({ r, index }, i) => {
         const t = calcTotals(r.items);
         return `<tr>
-            ${type === 'sales' ? `<td><input type="checkbox" class="sale-checkbox" data-idx="${i}" onchange="updateSaleSelectionUI()"></td>` : ''}
+            ${type === 'sales' ? `<td><input type="checkbox" class="sale-checkbox" data-idx="${index}" onchange="updateSaleSelectionUI()"></td>` : ''}
             <td>${i+1}</td><td class="cell-strong">${r.invoiceNo}</td><td>${r.party}</td>
             <td>${niceDate(r.date)}</td><td>${r.items.length} item${r.items.length>1?'s':''}</td>
             <td class="cell-strong">${fmt(t.total)}</td><td>${badge(r.status)}</td>
             <td>
-              <button class="btn sm icon" title="View" onclick="openInvoiceView('${type}',${i})"><i class="ti ti-eye"></i></button>
-              <button class="btn sm icon" title="Edit" onclick="editEntry(${i},'${type}')"><i class="ti ti-edit"></i></button>
-              <button class="btn sm icon danger" title="Delete" onclick="deleteEntry(${i},'${type}')"><i class="ti ti-trash"></i></button>
+              <button class="btn sm icon" title="View" onclick="openInvoiceView('${type}',${index})"><i class="ti ti-eye"></i></button>
+              <button class="btn sm icon" title="Edit" onclick="editEntry(${index},'${type}')"><i class="ti ti-edit"></i></button>
+              <button class="btn sm icon danger" title="Delete" onclick="deleteEntry(${index},'${type}')"><i class="ti ti-trash"></i></button>
             </td>
           </tr>`;
       }).join('');
@@ -1504,25 +1673,118 @@
     }
 
     function exportSalesReport() {
-      const headers = ['Invoice No', 'Customer', 'Date', 'Due Date', 'Status', 'Items', 'Subtotal', 'GST', 'Total', 'Notes'];
+      const headers = ['Invoice No', 'Customer', 'GSTIN', 'GST Type', 'Date', 'Due Date', 'Status', 'Items', 'Taxable Value', 'CGST', 'SGST', 'IGST', 'Total GST', 'Total', 'Notes'];
       const rows = store.sales.map(inv => {
-        const totals = calcTotals(inv.items || []);
-        const items = (inv.items || []).map(it => `${it.name} x ${it.qty} ${it.unit || ''} @ ${it.price}`).join('; ');
-        return [inv.invoiceNo, inv.party, inv.date, inv.due || '', inv.status, items, Math.round(totals.sub), Math.round(totals.gst), Math.round(totals.total), inv.notes || ''];
+        const party = getPartyRecord('sale', inv.party);
+        const taxType = resolveGstTaxType('sale', inv.party, inv.gst);
+        const totals = calcTotals(inv.items || [], taxType);
+        const items = (inv.items || []).map(it => `${it.name}${it.hsn ? ` (HSN ${it.hsn})` : ''} x ${it.qty} ${it.unit || ''} @ ${it.price}`).join('; ');
+        return [inv.invoiceNo, inv.party, party.gstin || inv.gst?.buyerGstin || '', taxType === 'interstate' ? 'IGST' : 'CGST+SGST', inv.date, inv.due || '', inv.status, items, Math.round(totals.taxable), Math.round(totals.cgst), Math.round(totals.sgst), Math.round(totals.igst), Math.round(totals.gst), Math.round(totals.total), inv.notes || ''];
       });
       downloadCSV('sale_invoice_report.csv', headers, rows);
       showToast('success', 'Sale invoice report download ho gaya.');
     }
 
     function exportPurchasesReport() {
-      const headers = ['Bill No', 'Vendor', 'Date', 'Due Date', 'Status', 'Items', 'Subtotal', 'GST', 'Total', 'Notes'];
+      const headers = ['Bill No', 'Vendor', 'GSTIN', 'GST Type', 'Date', 'Due Date', 'Status', 'Items', 'Taxable Value', 'CGST', 'SGST', 'IGST', 'Total GST', 'Total', 'Notes'];
       const rows = store.purchases.map(inv => {
-        const totals = calcTotals(inv.items || []);
-        const items = (inv.items || []).map(it => `${it.name} x ${it.qty} ${it.unit || ''} @ ${it.price}`).join('; ');
-        return [inv.invoiceNo, inv.party, inv.date, inv.due || '', inv.status, items, Math.round(totals.sub), Math.round(totals.gst), Math.round(totals.total), inv.notes || ''];
+        const party = getPartyRecord('purchase', inv.party);
+        const taxType = resolveGstTaxType('purchase', inv.party, inv.gst);
+        const totals = calcTotals(inv.items || [], taxType);
+        const items = (inv.items || []).map(it => `${it.name}${it.hsn ? ` (HSN ${it.hsn})` : ''} x ${it.qty} ${it.unit || ''} @ ${it.price}`).join('; ');
+        return [inv.invoiceNo, inv.party, party.gstin || inv.gst?.buyerGstin || '', taxType === 'interstate' ? 'IGST' : 'CGST+SGST', inv.date, inv.due || '', inv.status, items, Math.round(totals.taxable), Math.round(totals.cgst), Math.round(totals.sgst), Math.round(totals.igst), Math.round(totals.gst), Math.round(totals.total), inv.notes || ''];
       });
       downloadCSV('purchase_bill_report.csv', headers, rows);
       showToast('success', 'Purchase bill report download ho gaya.');
+    }
+
+    function exportGstSummaryReport() {
+      const headers = ['Section', 'Invoice No', 'Party', 'GSTIN', 'Date', 'GST Type', 'Taxable Value', 'CGST', 'SGST', 'IGST', 'Total GST', 'Invoice Total'];
+      const rows = [];
+      let salesTax = 0, purchaseTax = 0;
+
+      (store.sales || []).forEach(inv => {
+        const party = getPartyRecord('sale', inv.party);
+        const taxType = resolveGstTaxType('sale', inv.party, inv.gst);
+        const t = calcTotals(inv.items || [], taxType);
+        salesTax += t.gst;
+        rows.push(['Output GST (Sales)', inv.invoiceNo, inv.party, party.gstin || inv.gst?.buyerGstin || '', inv.date, taxType === 'interstate' ? 'IGST' : 'CGST+SGST', Math.round(t.taxable), Math.round(t.cgst), Math.round(t.sgst), Math.round(t.igst), Math.round(t.gst), Math.round(t.total)]);
+      });
+
+      (store.purchases || []).forEach(inv => {
+        const party = getPartyRecord('purchase', inv.party);
+        const taxType = resolveGstTaxType('purchase', inv.party, inv.gst);
+        const t = calcTotals(inv.items || [], taxType);
+        purchaseTax += t.gst;
+        rows.push(['Input GST (Purchase)', inv.invoiceNo, inv.party, party.gstin || inv.gst?.buyerGstin || '', inv.date, taxType === 'interstate' ? 'IGST' : 'CGST+SGST', Math.round(t.taxable), Math.round(t.cgst), Math.round(t.sgst), Math.round(t.igst), Math.round(t.gst), Math.round(t.total)]);
+      });
+
+      rows.push([]);
+      rows.push(['GST Summary', '', '', '', '', '', '', '', '', '', '', '']);
+      rows.push(['Output GST', '', '', '', '', '', '', '', '', '', Math.round(salesTax), '']);
+      rows.push(['Input GST', '', '', '', '', '', '', '', '', '', Math.round(purchaseTax), '']);
+      rows.push(['Net GST Payable', '', '', '', '', '', '', '', '', '', Math.round(salesTax - purchaseTax), '']);
+
+      downloadCSV('gst_summary_report.csv', headers, rows);
+      showToast('success', 'GST summary report download ho gaya.');
+    }
+
+    function exportGstr1Report() {
+      const b2bRows = [];
+      const b2cRows = [];
+      const hsnRows = collectHsnSummary('sales').map(r => [r.hsn, r.unit, r.qty, Math.round(r.taxable), r.gst, Math.round(r.cgst), Math.round(r.sgst), Math.round(r.igst), Math.round(r.totalTax)]);
+
+      (store.sales || []).forEach(inv => {
+        const party = getPartyRecord('sale', inv.party);
+        const taxType = resolveGstTaxType('sale', inv.party, inv.gst);
+        const t = calcTotals(inv.items || [], taxType);
+        const invoiceType = classifyGstInvoice(inv, party, 'sale');
+        const row = [inv.invoiceNo, inv.date, inv.party, party.gstin || inv.gst?.buyerGstin || '', invoiceType, taxType === 'interstate' ? 'IGST' : 'CGST+SGST', Math.round(t.taxable), Math.round(t.cgst), Math.round(t.sgst), Math.round(t.igst), Math.round(t.gst), Math.round(t.total), inv.status || ''];
+        if (invoiceType === 'B2B') b2bRows.push(row);
+        else b2cRows.push(row);
+      });
+
+      if (window.XLSX) {
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Invoice No','Date','Customer','GSTIN','Invoice Type','GST Type','Taxable Value','CGST','SGST','IGST','Total GST','Invoice Total','Status'], ...b2bRows]), 'B2B');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Invoice No','Date','Customer','GSTIN','Invoice Type','GST Type','Taxable Value','CGST','SGST','IGST','Total GST','Invoice Total','Status'], ...b2cRows]), 'B2C');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['HSN/SAC','Unit','Qty','Taxable Value','GST Rate','CGST','SGST','IGST','Total GST'], ...hsnRows]), 'HSN Summary');
+        XLSX.writeFile(wb, 'gstr1_sales_report.xlsx');
+      } else {
+        downloadCSV('gstr1_sales_report.csv', ['Invoice No','Date','Customer','GSTIN','Invoice Type','GST Type','Taxable Value','CGST','SGST','IGST','Total GST','Invoice Total','Status'], [...b2bRows, ...b2cRows]);
+      }
+      showToast('success', 'GSTR-1 sales report download ho gaya.');
+    }
+
+    function exportGstr3bReport() {
+      let outwardTaxable = 0, outwardCgst = 0, outwardSgst = 0, outwardIgst = 0;
+      let inwardTaxable = 0, itcCgst = 0, itcSgst = 0, itcIgst = 0;
+
+      (store.sales || []).forEach(inv => {
+        const taxType = resolveGstTaxType('sale', inv.party, inv.gst);
+        const t = calcTotals(inv.items || [], taxType);
+        outwardTaxable += t.taxable;
+        outwardCgst += t.cgst;
+        outwardSgst += t.sgst;
+        outwardIgst += t.igst;
+      });
+      (store.purchases || []).forEach(inv => {
+        const taxType = resolveGstTaxType('purchase', inv.party, inv.gst);
+        const t = calcTotals(inv.items || [], taxType);
+        inwardTaxable += t.taxable;
+        itcCgst += t.cgst;
+        itcSgst += t.sgst;
+        itcIgst += t.igst;
+      });
+
+      const rows = [
+        ['Section','Description','Taxable Value','IGST','CGST','SGST','Total GST'],
+        ['3.1(a)','Outward taxable supplies', Math.round(outwardTaxable), Math.round(outwardIgst), Math.round(outwardCgst), Math.round(outwardSgst), Math.round(outwardIgst + outwardCgst + outwardSgst)],
+        ['4(A)','Eligible ITC from purchases', Math.round(inwardTaxable), Math.round(itcIgst), Math.round(itcCgst), Math.round(itcSgst), Math.round(itcIgst + itcCgst + itcSgst)],
+        ['Net Payable','Output GST - ITC', '', Math.round(outwardIgst - itcIgst), Math.round(outwardCgst - itcCgst), Math.round(outwardSgst - itcSgst), Math.round((outwardIgst + outwardCgst + outwardSgst) - (itcIgst + itcCgst + itcSgst))]
+      ];
+      downloadCSV('gstr3b_summary.csv', rows[0], rows.slice(1));
+      showToast('success', 'GSTR-3B summary download ho gaya.');
     }
 
     function exportCustomersReport() {
@@ -1573,14 +1835,41 @@
       ]);
     }
 
-    function exportBulkReturnsToExcel() {
-      const headers = ['Platform', 'Order ID', 'Product Name', 'Date', 'Return Type', 'Status', 'Amount'];
-      let rows = collectBulkReturnRows().filter(row => row.some(v => String(v).trim() !== '' && String(v).trim() !== '0'));
-      if (!rows.length) {
-        rows = [['meesho', 'ORD123', 'Red T-Shirt', new Date().toISOString().split('T')[0], 'RTO (Courier Return)', 'pending', 499]];
-      }
-      downloadCSV('bulk_return_rows.csv', headers, rows);
-      showToast('success', 'Bulk return Excel/CSV download ho gaya.');
+    function handleBulkReturnImportFile(input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const ext = file.name.split('.').pop().toLowerCase();
+      const reader = new FileReader();
+
+      reader.onload = function(e) {
+        let text = '';
+        if ((ext === 'xlsx' || ext === 'xls') && window.XLSX) {
+          const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+          text = rows.map(row => row.map(cell => String(cell ?? '').trim()).join('\t')).join('\n');
+        } else {
+          text = String(e.target.result || '').replace(/^\uFEFF/, '');
+        }
+
+        let lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        const firstLine = (lines[0] || '').toLowerCase();
+        if (firstLine.includes('product') && (firstLine.includes('platform') || firstLine.includes('order'))) {
+          lines = lines.slice(1);
+        }
+        if (!lines.length) {
+          alert('Import file mein koi valid return row nahi mili.');
+          input.value = '';
+          return;
+        }
+
+        document.getElementById('bulk-paste-area').value = lines.join('\n');
+        parseBulkPaste();
+        input.value = '';
+      };
+
+      if ((ext === 'xlsx' || ext === 'xls') && window.XLSX) reader.readAsArrayBuffer(file);
+      else reader.readAsText(file);
     }
 
     function exportMainReport() {
@@ -1598,7 +1887,7 @@
         return [c.name, c.phone || '', c.gstin || '', c.address || '', invoices.length, Math.round(total)];
       });
       const returnRows = (kind = 'all') => getReturnsForReport(kind).map(r => [r.platform || '', r.orderId || '', r.productName || '', r.date || '', r.type || '', r.status || '', r.amount || 0]);
-      const productRows = store.products.map(p => [p.name, p.unit || '', p.salePrice || 0, p.purchasePrice || 0, p.gst || 0, p.stock || 0, p.packingStock || 0]);
+      const productRows = store.products.map(p => [p.name, p.hsn || '', p.unit || '', p.salePrice || 0, p.purchasePrice || 0, p.gst || 0, p.stock || 0, p.packingStock || 0]);
       const totalSales = store.sales.reduce((sum, inv) => sum + calcTotals(inv.items || []).total, 0);
       const totalPurchases = store.purchases.reduce((sum, inv) => sum + calcTotals(inv.items || []).total, 0);
 
@@ -1620,7 +1909,7 @@
         addSheet('Returns All', [['Platform', 'Order ID', 'Product', 'Date', 'Type', 'Status', 'Amount'], ...returnRows('all')]);
         addSheet('RTO Returns', [['Platform', 'Order ID', 'Product', 'Date', 'Type', 'Status', 'Amount'], ...returnRows('rto')]);
         addSheet('Customer Returns', [['Platform', 'Order ID', 'Product', 'Date', 'Type', 'Status', 'Amount'], ...returnRows('customer')]);
-        addSheet('Products', [['Product', 'Unit', 'Sale Price', 'Purchase Price', 'GST%', 'Stock', 'Packing Stock'], ...productRows]);
+        addSheet('Products', [['Product', 'HSN/SAC', 'Unit', 'Sale Price', 'Purchase Price', 'GST%', 'Stock', 'Packing Stock'], ...productRows]);
         addSheet('Purchases', [['Bill No', 'Vendor', 'Date', 'Status', 'Subtotal', 'GST', 'Total'], ...purchaseRows]);
         XLSX.writeFile(wb, 'billpro_main_report.xlsx');
       } else {
@@ -1637,9 +1926,9 @@
 
     // ─── PRODUCTS EXCEL IMPORT/EXPORT ────────────────────────────────────────
     function exportProductsToExcel() {
-      const headers = ['Product Name','Unit','Sale Price','Purchase Price','GST%','Stock'];
+      const headers = ['Product Name','HSN/SAC','Unit','Sale Price','Purchase Price','GST%','Stock'];
       const rows = store.products.map(p => [
-        p.name, p.unit||'pcs', p.salePrice||0, p.purchasePrice||0, p.gst||0, p.stock||0
+        p.name, p.hsn || '', p.unit||'pcs', p.salePrice||0, p.purchasePrice||0, p.gst||0, p.stock||0
       ]);
 
       // Build CSV (Excel compatible)
@@ -1722,10 +2011,11 @@
       if (!rows.length) { alert('Data mein koi product nahi mila.'); return; }
 
       const firstRow = rows[0].map(h => h.toLowerCase().replace(/[^a-z]/g, ''));
-      const hasHeader = firstRow.some(h => h.includes('name') || h.includes('product') || h.includes('sale') || h.includes('purchase') || h.includes('stock'));
-      const header = hasHeader ? firstRow : ['productname', 'unit', 'saleprice', 'purchaseprice', 'gst', 'stock'];
+      const hasHeader = firstRow.some(h => h.includes('name') || h.includes('product') || h.includes('hsn') || h.includes('sac') || h.includes('sale') || h.includes('purchase') || h.includes('stock'));
+      const header = hasHeader ? firstRow : ((rows[0] || []).length >= 7 ? ['productname', 'hsn', 'unit', 'saleprice', 'purchaseprice', 'gst', 'stock'] : ['productname', 'unit', 'saleprice', 'purchaseprice', 'gst', 'stock']);
       const dataRows = hasHeader ? rows.slice(1) : rows;
       const nameCol = header.findIndex(h => h.includes('name') || h.includes('product'));
+      const hsnCol = header.findIndex(h => h.includes('hsn') || h.includes('sac'));
       const unitCol = header.findIndex(h => h.includes('unit'));
       const saleCol = header.findIndex(h => h.includes('sale') || h.includes('sprice'));
       const purCol = header.findIndex(h => h.includes('purchase') || h.includes('pprice'));
@@ -1742,11 +2032,12 @@
         if (!name) { errors.push(`Row ${i + 1}: Product Name missing, skip`); return; }
         parsed.push({
           name,
-          unit: clean(unitCol >= 0 ? cols[unitCol] : cols[1]) || 'pcs',
-          salePrice: num(saleCol >= 0 ? cols[saleCol] : cols[2]),
-          purchasePrice: num(purCol >= 0 ? cols[purCol] : cols[3]),
-          gst: num(gstCol >= 0 ? cols[gstCol] : cols[4]),
-          stock: num(stockCol >= 0 ? cols[stockCol] : cols[5]),
+          hsn: clean(hsnCol >= 0 ? cols[hsnCol] : ''),
+          unit: clean(unitCol >= 0 ? cols[unitCol] : cols[2]) || 'pcs',
+          salePrice: num(saleCol >= 0 ? cols[saleCol] : cols[3]),
+          purchasePrice: num(purCol >= 0 ? cols[purCol] : cols[4]),
+          gst: num(gstCol >= 0 ? cols[gstCol] : cols[5]),
+          stock: num(stockCol >= 0 ? cols[stockCol] : cols[6]),
           packingStock: 0
         });
       });
@@ -1760,11 +2051,11 @@
       if (parsed.length > 0) {
         previewHTML += `<div class="table-wrap" style="max-height:280px;overflow-y:auto;">
           <table>
-            <thead><tr><th>#</th><th>Name</th><th>Unit</th><th>Sale Price</th><th>Purchase Price</th><th>GST%</th><th>Stock</th><th>Status</th></tr></thead>
+            <thead><tr><th>#</th><th>Name</th><th>HSN/SAC</th><th>Unit</th><th>Sale Price</th><th>Purchase Price</th><th>GST%</th><th>Stock</th><th>Status</th></tr></thead>
             <tbody>${parsed.map((p, i) => {
               const exists = store.products.some(sp => sp.name.toLowerCase() === p.name.toLowerCase());
               return `<tr>
-                <td>${i+1}</td><td><strong>${esc(p.name)}</strong></td><td>${p.unit}</td>
+                <td>${i+1}</td><td><strong>${esc(p.name)}</strong></td><td>${esc(p.hsn || '')}</td><td>${p.unit}</td>
                 <td>${fmt(p.salePrice)}</td><td>${fmt(p.purchasePrice)}</td><td>${p.gst}%</td><td>${p.stock}</td>
                 <td>${exists ? '<span class="badge pending">⚠ Update</span>' : '<span class="badge paid">✅ New</span>'}</td>
               </tr>`;
@@ -2308,6 +2599,7 @@
         document.getElementById('f-phone').value = r.phone || (partyData ? partyData.phone : '');
         document.getElementById('f-status').value = r.status;
         document.getElementById('f-notes').value = r.notes;
+        document.getElementById('f-gst-type').value = r.gst?.taxType || 'auto';
         document.getElementById('items-body').innerHTML = '';
         r.items.forEach(it => addItemRow(it));
       } else {
@@ -2319,6 +2611,7 @@
         document.getElementById('f-phone').value = '';
         document.getElementById('f-status').value = 'pending';
         document.getElementById('f-notes').value = '';
+        document.getElementById('f-gst-type').value = 'auto';
         document.getElementById('items-body').innerHTML = '';
       }
       updateTotals();
@@ -2345,6 +2638,7 @@
       const tr = document.createElement('tr');
       tr.innerHTML = `
           <td><input type="text" class="i-name" value="${data.name||''}" placeholder="Item name" required></td>
+          <td><input type="text" class="i-hsn" value="${data.hsn||''}" placeholder="HSN/SAC"></td>
           <td><input type="number" class="i-qty" value="${data.qty||1}" min="0.01" step="any" oninput="updateTotals()" required></td>
           <td><input type="text" class="i-unit" value="${data.unit||'pcs'}" placeholder="unit"></td>
           <td><input type="number" class="i-price" value="${data.price||0}" min="0" step="any" oninput="updateTotals()" required></td>
@@ -2362,7 +2656,7 @@
         alert(`Stock kam hai! Available: ${prod.stock||0}`);
         return;
       }
-      addItemRow({ name: prod.name, qty, unit: prod.unit, price: currentType === 'sale' ? prod.salePrice :
+      addItemRow({ name: prod.name, hsn: prod.hsn || '', qty, unit: prod.unit, price: currentType === 'sale' ? prod.salePrice :
           prod.purchasePrice, gst: prod.gst });
       updateTotals();
       document.getElementById('quick-product').value = '';
@@ -2378,9 +2672,20 @@
           gst: tr.querySelector('.i-gst').value
         });
       });
-      const t = calcTotals(items);
+      const party = document.getElementById('f-party').value.trim();
+      const gstChoice = document.getElementById('f-gst-type')?.value || 'auto';
+      const autoType = resolveGstTaxType(currentType, party);
+      const taxType = gstChoice === 'auto' ? autoType : gstChoice;
+      const t = calcTotals(items, taxType);
       document.getElementById('t-sub').textContent = fmt(t.sub);
       document.getElementById('t-gst').textContent = fmt(t.gst);
+      document.getElementById('t-cgst').textContent = fmt(t.cgst);
+      document.getElementById('t-sgst').textContent = fmt(t.sgst);
+      document.getElementById('t-igst').textContent = fmt(t.igst);
+      document.getElementById('t-cgst-row').style.display = taxType === 'interstate' ? 'none' : 'flex';
+      document.getElementById('t-sgst-row').style.display = taxType === 'interstate' ? 'none' : 'flex';
+      document.getElementById('t-igst-row').style.display = taxType === 'interstate' ? 'flex' : 'none';
+      document.getElementById('t-gst-type').textContent = taxType === 'interstate' ? 'IGST' : 'CGST + SGST';
       document.getElementById('t-total').textContent = fmt(t.total);
     }
 
@@ -2393,24 +2698,47 @@
       const status = document.getElementById('f-status').value;
       const notes = document.getElementById('f-notes').value.trim();
       const phone = document.getElementById('f-phone').value;
+      const gstChoice = document.getElementById('f-gst-type')?.value || 'auto';
 
       if (!party || !num || !date) { alert('Party name, bill number aur date daalna zaruri hai.'); return; }
 
       const items = [];
       document.querySelectorAll('#items-body tr').forEach(tr => {
         const name = tr.querySelector('.i-name').value.trim();
+        const hsn = tr.querySelector('.i-hsn')?.value.trim() || '';
         const qty = parseFloat(tr.querySelector('.i-qty').value) || 0;
         const unit = tr.querySelector('.i-unit').value.trim();
         const price = parseFloat(tr.querySelector('.i-price').value) || 0;
         const gst = parseFloat(tr.querySelector('.i-gst').value) || 0;
-        if (name) items.push({ name, qty, unit, price, gst });
+        if (name) items.push({ name, hsn, qty, unit, price, gst });
       });
 
       if (!items.length) { alert('Kam se kam ek item add karein.'); return; }
 
       const invoiceNo = prefix + num;
       const typeKey = currentType === 'sale' ? 'sales' : 'purchases';
-      const entry = { invoiceNo, party, date, due, status, notes, phone, items };
+      const partyRecord = getPartyRecord(currentType, party);
+      const autoTaxType = resolveGstTaxType(currentType, party);
+      const taxType = gstChoice === 'auto' ? autoTaxType : gstChoice;
+      const biz = store.business || defaultStore.business;
+      const entry = {
+        invoiceNo,
+        party,
+        date,
+        due,
+        status,
+        notes,
+        phone,
+        items,
+        gst: {
+          taxType,
+          sellerGstin: biz.gstin || '',
+          buyerGstin: partyRecord.gstin || '',
+          sellerStateCode: getBusinessStateCode(),
+          buyerStateCode: partyRecord.stateCode || gstStateCodeFromGSTIN(partyRecord.gstin) || '',
+          reverseCharge: false
+        }
+      };
 
       const existing = store[typeKey].some((e, idx) => idx !== editIndex && e.invoiceNo === invoiceNo);
       if (existing) {
@@ -2499,6 +2827,7 @@
       const gstin = document.getElementById('p-gstin').value.trim().toUpperCase();
       const address = document.getElementById('p-address').value.trim();
       if (!name) { alert('Naam daalna zaruri hai.'); return; }
+      if (!isValidGSTIN(gstin)) { alert('GSTIN format sahi nahi hai. Example: 09ABCDE1234F1Z5'); return; }
       const arr = currentPartyType === 'customer' ? store.customers : store.vendors;
       arr.push({ name, phone, gstin, address });
       await saveData();
@@ -2521,13 +2850,13 @@
     function renderProducts() {
       const tbody = document.getElementById('products-tbody');
       if (!store.products.length) { tbody.innerHTML =
-          '<tr><td colspan="8" class="empty">Koi product nahi. Abhi add karein.</td></tr>'; return; }
+          '<tr><td colspan="9" class="empty">Koi product nahi. Abhi add karein.</td></tr>'; return; }
       tbody.innerHTML = store.products.map((p, i) => {
         const packing = p.packingStock || 0;
         const stockColor = (p.stock || 0) <= 0 ? 'var(--red)' : (p.stock || 0) <= 5 ? 'var(--amber)' : 'var(--green)';
         const packingColor = packing <= 0 ? 'var(--red)' : 'var(--green)';
         return `<tr>
-          <td>${i+1}</td><td class="cell-strong">${p.name}</td><td>${p.unit||'-'}</td>
+          <td>${i+1}</td><td class="cell-strong">${p.name}</td><td>${p.hsn || '-'}</td><td>${p.unit||'-'}</td>
           <td class="cell-strong">${fmt(p.salePrice||0)}</td><td>${fmt(p.purchasePrice||0)}</td>
           <td>${p.gst||0}%</td>
           <td style="color:${stockColor}"><strong>${p.stock||0}</strong> <small style="color:${packingColor}">(Packing: ${packing})</small></td>
@@ -2562,7 +2891,8 @@
 
     function quickAddChip(name, price, unit, gst, stock) {
       if (stock <= 0) { alert(`${name} out of stock hai!`); return; }
-      addItemRow({ name, qty: 1, unit, price, gst });
+      const prod = findProduct(name) || {};
+      addItemRow({ name, hsn: prod.hsn || '', qty: 1, unit, price, gst });
       updateTotals();
     }
 
@@ -2573,6 +2903,7 @@
         const p = store.products[idx];
         document.getElementById('pr-name').value = p.name;
         document.getElementById('pr-unit').value = p.unit;
+        document.getElementById('pr-hsn').value = p.hsn || '';
         document.getElementById('pr-sale').value = p.salePrice;
         document.getElementById('pr-purchase').value = p.purchasePrice;
         document.getElementById('pr-gst').value = p.gst;
@@ -2580,6 +2911,7 @@
         document.getElementById('product-modal-title').textContent = 'Edit Product';
       } else {
         document.getElementById('pr-name').value = '';
+        document.getElementById('pr-hsn').value = '';
         document.getElementById('pr-unit').value = 'pcs';
         document.getElementById('pr-sale').value = '';
         document.getElementById('pr-purchase').value = '';
@@ -2595,6 +2927,7 @@
 	document.getElementById('product-modal').classList.remove('open'); }
     async function saveProduct() {
   const name = document.getElementById('pr-name').value.trim();
+  const hsn = document.getElementById('pr-hsn').value.trim();
   const unit = document.getElementById('pr-unit').value.trim();
   const salePrice = parseFloat(document.getElementById('pr-sale').value) || 0;
   const purchasePrice = parseFloat(document.getElementById('pr-purchase').value) || 0;
@@ -2617,6 +2950,7 @@
 
   const p = {
     name,
+    hsn,
     unit,
     salePrice,
     purchasePrice,
@@ -2715,32 +3049,47 @@
       const r = data[index];
       const partyList = type === 'sales' ? store.customers : store.vendors;
       const party = partyList.find(p => p.name === r.party) || {};
-      const totals = calcTotals(r.items);
+      const taxType = resolveGstTaxType(type, r.party, r.gst);
+      const totals = calcTotals(r.items, taxType);
       const title = type === 'sales' ? 'SALE INVOICE' : 'PURCHASE BILL';
       const billLabel = type === 'sales' ? 'Invoice No' : 'Bill No';
       const biz = store.business || defaultStore.business;
+      const gstModeLabel = taxType === 'interstate' ? 'IGST' : 'CGST + SGST';
 
       const rows = r.items.map((item, i) => {
         const c = calcItem(item);
+        const cgst = taxType === 'interstate' ? 0 : c.tax / 2;
+        const sgst = taxType === 'interstate' ? 0 : c.tax / 2;
+        const igst = taxType === 'interstate' ? c.tax : 0;
         return `<tr>
             <td style="font-weight:700;color:#667085">${i+1}</td>
             <td style="font-weight:700">${esc(item.name)}</td>
+            <td>${esc(item.hsn || '-')}</td>
             <td>${esc(item.qty)} ${esc(item.unit)}</td>
             <td>${fmt(item.price)}</td>
             <td>${esc(item.gst)}%</td>
+            <td>${fmt(c.taxable)}</td>
+            ${taxType === 'interstate' ? `<td>${fmt(igst)}</td>` : `<td>${fmt(cgst)}</td><td>${fmt(sgst)}</td>`}
             <td style="font-weight:800;color:#1663a6">${fmt(c.total)}</td>
           </tr>`;
       }).join('');
+
+      const gstSummaryRows = totals.breakup.map(row => `<tr>
+          <td>${row.rate}%</td>
+          <td>${fmt(row.taxable)}</td>
+          ${taxType === 'interstate' ? `<td>${fmt(row.igst)}</td>` : `<td>${fmt(row.cgst)}</td><td>${fmt(row.sgst)}</td>`}
+          <td>${fmt(row.totalTax)}</td>
+        </tr>`).join('');
 
       return `
         <div class="inv-header">
           <div>
             <div class="inv-brand-name">${esc(biz.name)}</div>
-            <div class="inv-brand-sub">Premium Business Solutions</div>
+            <div class="inv-brand-sub">${esc(biz.tagline || 'Business Invoice')}</div>
             <div class="inv-brand-details">
-              📍 ${esc(biz.address)}<br>
-              📞 ${esc(biz.phone)} &nbsp;|&nbsp; ✉ ${esc(biz.email)}<br>
-              🏷 GSTIN: ${esc(biz.gstin)}
+              ${biz.address ? `${esc(biz.address)}<br>` : ''}
+              ${biz.phone || biz.email ? `${esc(biz.phone || '')} ${biz.phone && biz.email ? '&nbsp;|&nbsp;' : ''} ${esc(biz.email || '')}<br>` : ''}
+              ${biz.gstin ? `GSTIN: ${esc(biz.gstin)}` : ''}
             </div>
           </div>
           <div class="inv-title-block">
@@ -2749,7 +3098,8 @@
               <div>${billLabel}: <strong>${esc(r.invoiceNo)}</strong></div>
               <div>Date: <strong>${niceDate(r.date)}</strong></div>
               ${r.due ? `<div>Due: <strong>${niceDate(r.due)}</strong></div>` : ''}
-              <div>Status: <strong style="color:${r.status === 'paid' ? '#5fffb0' : '#ffd97d'}">${r.status.toUpperCase()}</strong></div>
+              <div>GST Type: <strong>${gstModeLabel}</strong></div>
+              <div>Status: <strong class="inv-status inv-status-${esc(r.status)}">${r.status.toUpperCase()}</strong></div>
             </div>
           </div>
         </div>
@@ -2759,16 +3109,19 @@
             <div class="inv-section-label">${type === 'sales' ? 'Bill To' : 'Vendor'}</div>
             <div class="inv-party-name">${esc(r.party)}</div>
             <div class="inv-party-detail">
-              ${r.phone || party.phone ? `📞 ${esc(r.phone || party.phone)}<br>` : ''}
-              ${party.gstin ? `🏷 GSTIN: ${esc(party.gstin)}<br>` : ''}
-              ${party.address ? `📍 ${esc(party.address)}` : ''}
+              ${r.phone || party.phone ? `${esc(r.phone || party.phone)}<br>` : ''}
+              ${party.gstin ? `GSTIN: ${esc(party.gstin)}<br>` : ''}
+              ${party.address ? `${esc(party.address)}` : ''}
             </div>
           </div>
           <div class="inv-summary-box">
             <div class="inv-section-label">Amount Summary</div>
             <div class="inv-amount-big">${fmt(totals.total)}</div>
             <div class="inv-amount-row"><span>Subtotal</span><span>${fmt(totals.sub)}</span></div>
-            <div class="inv-amount-row"><span>GST</span><span>${fmt(totals.gst)}</span></div>
+            ${taxType === 'interstate'
+              ? `<div class="inv-amount-row"><span>IGST</span><span>${fmt(totals.igst)}</span></div>`
+              : `<div class="inv-amount-row"><span>CGST</span><span>${fmt(totals.cgst)}</span></div><div class="inv-amount-row"><span>SGST</span><span>${fmt(totals.sgst)}</span></div>`}
+            <div class="inv-amount-row"><span>Total GST</span><span>${fmt(totals.gst)}</span></div>
             <div class="inv-amount-row" style="font-weight:800;color:#182230;border-top:1px solid #d0dde8;margin-top:4px;padding-top:6px">
               <span>Grand Total</span><span style="color:#1663a6">${fmt(totals.total)}</span>
             </div>
@@ -2781,18 +3134,35 @@
               <tr>
                 <th>#</th>
                 <th>Item / Description</th>
+                <th>HSN/SAC</th>
                 <th>Qty & Unit</th>
                 <th>Rate</th>
                 <th>GST</th>
+                <th>Taxable</th>
+                ${taxType === 'interstate' ? '<th>IGST</th>' : '<th>CGST</th><th>SGST</th>'}
                 <th>Amount</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
             <tfoot>
-              <tr><td colspan="5" style="text-align:right;color:#667085;font-weight:700">Subtotal</td><td>${fmt(totals.sub)}</td></tr>
-              <tr><td colspan="5" style="text-align:right;color:#667085;font-weight:700">GST</td><td>${fmt(totals.gst)}</td></tr>
-              <tr class="grand-total"><td colspan="5" style="text-align:right">Total Amount</td><td>${fmt(totals.total)}</td></tr>
+              <tr><td colspan="${taxType === 'interstate' ? 8 : 9}" style="text-align:right;color:#667085;font-weight:700">Subtotal</td><td>${fmt(totals.sub)}</td></tr>
+              <tr><td colspan="${taxType === 'interstate' ? 8 : 9}" style="text-align:right;color:#667085;font-weight:700">GST</td><td>${fmt(totals.gst)}</td></tr>
+              <tr class="grand-total"><td colspan="${taxType === 'interstate' ? 8 : 9}" style="text-align:right">Total Amount</td><td>${fmt(totals.total)}</td></tr>
             </tfoot>
+          </table>
+        </div>
+
+        <div class="inv-items-wrap" style="margin-top:14px;">
+          <table class="inv-table gst-summary-table">
+            <thead>
+              <tr>
+                <th>GST Rate</th>
+                <th>Taxable Value</th>
+                ${taxType === 'interstate' ? '<th>IGST</th>' : '<th>CGST</th><th>SGST</th>'}
+                <th>Total GST</th>
+              </tr>
+            </thead>
+            <tbody>${gstSummaryRows || `<tr><td colspan="${taxType === 'interstate' ? 4 : 5}">No GST</td></tr>`}</tbody>
           </table>
         </div>
 
@@ -2821,6 +3191,8 @@
 
     function openInvoiceView(type, index) {
       activeInvoice = { type, index };
+      const biz = store.business || defaultStore.business;
+      document.getElementById('invoice-preview').setAttribute('data-watermark', biz.name || 'INVOICE');
       document.getElementById('invoice-preview').innerHTML = invoiceHTML(type, index);
       document.getElementById('invoice-view-modal').classList.add('open');
     }
@@ -2881,15 +3253,150 @@
       }, 1500);
     }
 
+    async function toggleEmployeeStatus(idx) {
+      const emp = store.employees[idx];
+      if (!emp) return;
+      const nextStatus = (emp.status || 'active') === 'active' ? 'inactive' : 'active';
+      if (!await verifyActionPassword(`${nextStatus === 'active' ? 'Activate' : 'Deactivate'} Employee`)) return;
+
+      emp.status = nextStatus;
+      try {
+        const q = query(getEmployeesCollection(), where('adminUid', '==', currentUser), where('username', '==', emp.username));
+        const snap = await getDocs(q);
+        for (const docSnap of snap.docs) {
+          await setDoc(docSnap.ref, { status: nextStatus }, { merge: true });
+        }
+      } catch (e) {
+        console.warn('Failed to update employee status doc:', e);
+      }
+
+      const currentEmp = currentEmployeeUsername;
+      if (nextStatus === 'inactive' && emp.username === currentEmp) logoutEmployee();
+
+      await saveData();
+      renderEmployees();
+      showToast('success', `Employee ${nextStatus === 'active' ? 'active' : 'inactive'} ho gaya.`);
+    }
+
+    function toggleEmployeePassword(idx) {
+      if (visibleEmployeePasswords.has(idx)) {
+        visibleEmployeePasswords.delete(idx);
+      } else {
+        visibleEmployeePasswords.add(idx);
+      }
+      renderEmployees();
+    }
+
+    async function setEmployeePassword(idx) {
+      const emp = store.employees[idx];
+      if (!emp) return;
+      if (!await verifyActionPassword('Set Employee Password')) return;
+
+      const p1 = prompt(`${emp.username} ka naya password daalein:`);
+      if (!p1) return;
+      const p2 = prompt('Password confirm karein:');
+      if (p1 !== p2) {
+        alert('Passwords match nahi ho rahe.');
+        return;
+      }
+
+      const passwordHash = await hashPassword(p1);
+      emp.passwordHash = passwordHash;
+      emp.passwordPlain = p1;
+      visibleEmployeePasswords.add(idx);
+
+      try {
+        const q = query(getEmployeesCollection(), where('adminUid', '==', currentUser), where('username', '==', emp.username));
+        const snap = await getDocs(q);
+        for (const docSnap of snap.docs) {
+          await setDoc(docSnap.ref, { passwordHash, passwordPlain: p1 }, { merge: true });
+        }
+      } catch (e) {
+        console.warn('Failed to update employee password doc:', e);
+      }
+
+      await saveData();
+      renderEmployees();
+      showToast('success', 'Employee password set ho gaya.');
+    }
+
+    function togglePasswordInput(inputId, btn) {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+      const shouldShow = input.type === 'password';
+      input.type = shouldShow ? 'text' : 'password';
+      if (btn) {
+        btn.innerHTML = `<i class="ti ${shouldShow ? 'ti-eye-off' : 'ti-eye'}"></i>${shouldShow ? 'Hide' : 'Show'}`;
+        btn.title = `${shouldShow ? 'Hide' : 'Show'} Password`;
+      }
+    }
+
     function renderEmployees() {
       const tbody = document.getElementById('employees-table').querySelector('tbody');
       if (!store.employees || !store.employees.length) { tbody.innerHTML =
           '<tr><td colspan="5" class="empty">Koi employee added nahi hai.</td></tr>'; return; }
-      tbody.innerHTML = store.employees.map((e, i) => `<tr>
-          <td>${i+1}</td><td class="cell-strong">${esc(e.username)}</td><td>••••••••</td>
-          <td><span class="badge paid">${esc(e.status)}</span></td>
-          <td><button class="btn sm icon danger" onclick="deleteEmployeeRecord(${i})"><i class="ti ti-trash"></i></button></td>
-        </tr>`).join('');
+      tbody.innerHTML = store.employees.map((e, i) => {
+        const status = e.status || 'active';
+        const isActive = status === 'active';
+        const hasSavedPassword = !!e.passwordPlain;
+        const showPassword = visibleEmployeePasswords.has(i);
+        const passwordText = hasSavedPassword ? (showPassword ? esc(e.passwordPlain) : '••••••••') : 'Not saved';
+        return `<tr>
+          <td>${i+1}</td><td class="cell-strong">${esc(e.username)}</td>
+          <td>
+            <div style="display:flex;gap:8px;align-items:center;min-width:130px;">
+              <span style="${hasSavedPassword ? '' : 'color:var(--muted);'}">${passwordText}</span>
+              ${hasSavedPassword ? `<button class="btn sm" title="${showPassword ? 'Hide' : 'Show'} Password" onclick="toggleEmployeePassword(${i})"><i class="ti ${showPassword ? 'ti-eye-off' : 'ti-eye'}"></i>${showPassword ? 'Hide' : 'Show'}</button>` : `<button class="btn sm primary" title="Set Password" onclick="setEmployeePassword(${i})"><i class="ti ti-key"></i>Set Password</button>`}
+            </div>
+          </td>
+          <td><span class="badge ${isActive ? 'paid' : 'cancelled'}">${isActive ? 'Active' : 'Inactive'}</span></td>
+          <td style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn sm ${isActive ? '' : 'primary'}" onclick="toggleEmployeeStatus(${i})">
+              <i class="ti ${isActive ? 'ti-user-off' : 'ti-user-check'}"></i>${isActive ? 'Inactive' : 'Active'}
+            </button>
+            <button class="btn sm icon danger" title="Delete" onclick="deleteEmployeeRecord(${i})"><i class="ti ti-trash"></i></button>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    function renderBusinessProfile() {
+      const biz = { ...structuredClone(defaultStore.business), ...(store.business || {}) };
+      document.getElementById('biz-name').value = biz.name || '';
+      document.getElementById('biz-tagline').value = biz.tagline || '';
+      document.getElementById('biz-gstin').value = biz.gstin || '';
+      document.getElementById('biz-state').value = biz.stateCode || gstStateCodeFromGSTIN(biz.gstin) || '';
+      document.getElementById('biz-phone').value = biz.phone || '';
+      document.getElementById('biz-email').value = biz.email || '';
+      document.getElementById('biz-address').value = biz.address || '';
+      document.getElementById('biz-preview-name').textContent = biz.name || 'Your Company Name';
+      document.getElementById('biz-preview-meta').innerHTML = `
+        ${biz.tagline ? esc(biz.tagline) + '<br>' : ''}
+        ${biz.address ? esc(biz.address) + '<br>' : ''}
+        ${biz.gstin ? 'GSTIN: ' + esc(biz.gstin) + '<br>' : ''}
+        ${[biz.phone, biz.email].filter(Boolean).map(esc).join(' | ') || 'Phone / Email'}
+      `;
+    }
+
+    async function saveBusinessProfile() {
+      const name = document.getElementById('biz-name').value.trim() || 'Your Company Name';
+      const tagline = document.getElementById('biz-tagline').value.trim() || 'Business Invoice';
+      const gstin = document.getElementById('biz-gstin').value.trim().toUpperCase();
+      const stateCode = document.getElementById('biz-state').value.trim() || gstStateCodeFromGSTIN(gstin);
+      if (!isValidGSTIN(gstin)) { alert('GSTIN format sahi nahi hai. Example: 09ABCDE1234F1Z5'); return; }
+      if (stateCode && !/^\d{2}$/.test(stateCode)) { alert('State code 2 digit hona chahiye. Example: 09'); return; }
+      store.business = {
+        name,
+        tagline,
+        gstin,
+        stateCode,
+        phone: document.getElementById('biz-phone').value.trim(),
+        email: document.getElementById('biz-email').value.trim(),
+        address: document.getElementById('biz-address').value.trim()
+      };
+      await saveData();
+      renderBusinessProfile();
+      showToast('success', 'Business profile save ho gaya. Invoice ab isi naam se banega.');
     }
 
     function openEmpSetupModal() {
@@ -2987,6 +3494,7 @@
     // ─── EXPOSE ALL FUNCTIONS TO GLOBAL SCOPE ──────────────────────────────
     window.login = login;
     window.setAuthMode = setAuthMode;
+    window.handleAuthEnter = handleAuthEnter;
     window.createAccount = createAccount;
     window.resetPassword = resetPassword;
     window.switchAuthTab = switchAuthTab;
@@ -3010,6 +3518,13 @@
     window.activateEmployeeAccess = activateEmployeeAccess;
     window.closePaymentModal = closePaymentModal;
     window.submitPayment = submitPayment;
+    window.renderBusinessProfile = renderBusinessProfile;
+    window.saveBusinessProfile = saveBusinessProfile;
+    window.gstStateCodeFromGSTIN = gstStateCodeFromGSTIN;
+    window.toggleEmployeeStatus = toggleEmployeeStatus;
+    window.toggleEmployeePassword = toggleEmployeePassword;
+    window.setEmployeePassword = setEmployeePassword;
+    window.togglePasswordInput = togglePasswordInput;
     window.saveParty = saveParty;
     window.saveProduct = saveProduct;
     window.saveEntry = saveEntry;
@@ -3059,7 +3574,10 @@
     window.updateTotals = updateTotals;
     window.renderCustomerLedger = renderCustomerLedger;
     window.exportReturnsReport = exportReturnsReport;
-    window.exportBulkReturnsToExcel = exportBulkReturnsToExcel;
+    window.handleBulkReturnImportFile = handleBulkReturnImportFile;
+    window.exportGstSummaryReport = exportGstSummaryReport;
+    window.exportGstr1Report = exportGstr1Report;
+    window.exportGstr3bReport = exportGstr3bReport;
     window.exportMainReport = exportMainReport;
     window.exportProductsToExcel = exportProductsToExcel;
     window.calcTotals = calcTotals;
@@ -3129,295 +3647,6 @@
     document.getElementById('customer-ledger-modal').addEventListener('click', function(e) {
       if (e.target === this) {
         closeCustomerLedger();
-      }
-    });
-
-    // ─── BARCODE SCANNER ────────────────────────────────────────────────────
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzpwcg2U04A9yw2FnU8RJEwTevslXAHcbKaGBVMk6u-lUhIm3Lv4hJ-oY5dUQwF9XWc/exec';
-
-    window.sendBarcode = async function() {
-      const input = document.getElementById('scanner-input');
-      const qtyEl = document.getElementById('scanner-qty');
-      const statusEl = document.getElementById('scanner-status');
-      const btn = document.getElementById('scanner-send-btn');
-
-      const barcode = input.value.trim();
-      const qty = parseInt(qtyEl.value) || 1;
-
-      if (!barcode) {
-        input.focus();
-        return;
-      }
-
-      // UI: loading state
-      btn.disabled = true;
-      btn.innerHTML = '<i class="ti ti-loader"></i> Sending...';
-      statusEl.style.display = 'none';
-
-      const now = new Date();
-      const datetime = now.toLocaleString('en-IN', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
-      });
-
-      try {
-        const res = await fetch(APPS_SCRIPT_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ barcode, datetime, quantity: qty })
-        });
-
-        // no-cors mode mein response check nahi hota, assume success
-        showScannerStatus('success', `✅ Sent: ${barcode} (Qty: ${qty})`);
-        addToScanLog(barcode, qty, datetime);
-
-        // Auto-focus & clear
-        if (document.getElementById('scanner-autofocus').checked) {
-          input.value = '';
-          qtyEl.value = '1';
-          input.focus();
-        }
-
-        // Google Sheet iframe refresh (2 sec baad)
-        setTimeout(() => {
-          const iframe = document.querySelector('#ss-table-container iframe');
-          if (iframe) {
-            const src = iframe.src;
-            iframe.src = '';
-            setTimeout(() => { iframe.src = src; }, 100);
-          }
-        }, 2000);
-
-      } catch (err) {
-        showScannerStatus('error', '❌ Error: ' + err.message);
-      } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="ti ti-send"></i> Google Sheet mein Send';
-      }
-    };
-
-    function showScannerStatus(type, msg) {
-      const el = document.getElementById('scanner-status');
-      el.style.display = 'block';
-      el.style.background = type === 'success' ? '#e6f9f0' : '#ffeaea';
-      el.style.color = type === 'success' ? '#1a7a4a' : '#c0392b';
-      el.style.border = `1px solid ${type === 'success' ? '#a3e4c1' : '#f5c6cb'}`;
-      el.textContent = msg;
-      setTimeout(() => { el.style.display = 'none'; }, 3000);
-    }
-
-    const scanLogEntries = [];
-
-    function addToScanLog(barcode, qty, datetime) {
-      scanLogEntries.unshift({ barcode, qty, datetime });
-      if (scanLogEntries.length > 20) scanLogEntries.pop();
-      renderScanLog();
-    }
-
-    function renderScanLog() {
-      const logEl = document.getElementById('scan-log');
-      if (!logEl) return;
-      if (!scanLogEntries.length) {
-        logEl.innerHTML = '<p style="font-size:12px;color:var(--muted);text-align:center;padding:12px 0;">Abhi koi scan nahi hua</p>';
-        return;
-      }
-      logEl.innerHTML = scanLogEntries.map(e => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:#f7f9fb;border-radius:6px;border:1px solid var(--line-soft);">
-          <div>
-            <div style="font-size:13px;font-weight:700;color:var(--text);">${esc(e.barcode)}</div>
-            <div style="font-size:11px;color:var(--muted);">${e.datetime} · Qty: ${e.qty}</div>
-          </div>
-          <i class="ti ti-circle-check" style="color:var(--green);font-size:16px;"></i>
-        </div>`).join('');
-    }
-
-    window.clearScanLog = function() {
-      scanLogEntries.length = 0;
-      renderScanLog();
-    };
-
-    window.toggleScannerAutofocus = function() {};
-
-    // ─── CAMERA BARCODE SCANNER (ZXing) ─────────────────────────────────────
-    let codeReader = null;
-    let cameraStream = null;
-    let isCameraOn = false;
-
-    window.toggleCameraScanner = async function() {
-      if (isCameraOn) {
-        stopCameraScanner();
-      } else {
-        startCameraScanner();
-      }
-    };
-
-    window.startCameraScanner = async function() {
-      const container = document.getElementById('camera-container');
-      const btn = document.getElementById('camera-scan-btn');
-      const statusEl = document.getElementById('camera-status');
-
-      // ZXing library check
-      if (typeof ZXing === 'undefined') {
-        showScannerStatus('error', '❌ Camera library load nahi hui. Refresh karein.');
-        return;
-      }
-
-      try {
-        statusEl.style.display = 'block';
-        statusEl.textContent = '📷 Camera start ho raha hai...';
-        container.style.display = 'block';
-        btn.innerHTML = '<i class="ti ti-camera-off"></i> Camera Band Karo';
-        btn.style.background = 'linear-gradient(135deg,#c0392b,#922b21)';
-        isCameraOn = true;
-
-        codeReader = new ZXing.BrowserMultiFormatReader();
-
-        const videoEl = document.getElementById('camera-video');
-
-        // Back camera prefer karo (mobile ke liye)
-        const constraints = {
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          }
-        };
-
-        cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
-        videoEl.srcObject = cameraStream;
-        await videoEl.play();
-
-        statusEl.textContent = '🟢 Camera ready — barcode ko green box mein rakhein';
-
-        // Continuously scan frames
-        scanFrame();
-
-      } catch (err) {
-        let msg = '❌ Camera error: ' + err.message;
-        if (err.name === 'NotAllowedError') msg = '❌ Camera permission denied. Browser settings mein allow karein.';
-        if (err.name === 'NotFoundError') msg = '❌ Camera nahi mila device mein.';
-        showScannerStatus('error', msg);
-        statusEl.style.display = 'none';
-        container.style.display = 'none';
-        btn.innerHTML = '<i class="ti ti-camera"></i> 📱 Mobile Camera se Scan';
-        btn.style.background = 'linear-gradient(135deg,#16a663,#0c7c47)';
-        isCameraOn = false;
-      }
-    };
-
-    let lastScannedCode = '';
-    let lastScanTime = 0;
-
-    function scanFrame() {
-      if (!isCameraOn) return;
-
-      const video = document.getElementById('camera-video');
-      const canvas = document.getElementById('camera-canvas');
-      if (!video || !canvas || video.readyState < 2) {
-        requestAnimationFrame(scanFrame);
-        return;
-      }
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0);
-
-      try {
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const hints = new Map();
-        const formats = [
-          ZXing.BarcodeFormat.QR_CODE,
-          ZXing.BarcodeFormat.CODE_128,
-          ZXing.BarcodeFormat.CODE_39,
-          ZXing.BarcodeFormat.EAN_13,
-          ZXing.BarcodeFormat.EAN_8,
-          ZXing.BarcodeFormat.UPC_A,
-          ZXing.BarcodeFormat.UPC_E,
-          ZXing.BarcodeFormat.DATA_MATRIX,
-          ZXing.BarcodeFormat.ITF,
-        ];
-        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
-
-        const luminanceSource = new ZXing.RGBLuminanceSource(imageData.data, canvas.width, canvas.height);
-        const binaryBitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminanceSource));
-        const reader = new ZXing.MultiFormatReader();
-        reader.setHints(hints);
-        const result = reader.decode(binaryBitmap);
-
-        if (result) {
-          const code = result.getText();
-          const now = Date.now();
-          // Same code 2 second ke andar dobara na scan ho
-          if (code !== lastScannedCode || now - lastScanTime > 2000) {
-            lastScannedCode = code;
-            lastScanTime = now;
-            // Input mein set karo aur send karo
-            document.getElementById('scanner-input').value = code;
-            // Beep sound
-            playBeep();
-            // Auto send
-            sendBarcode();
-          }
-        }
-      } catch (e) {
-        // NotFoundException — normal, matlab frame mein barcode nahi mila
-      }
-
-      requestAnimationFrame(scanFrame);
-    }
-
-    window.stopCameraScanner = function() {
-      isCameraOn = false;
-      lastScannedCode = '';
-
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(t => t.stop());
-        cameraStream = null;
-      }
-
-      const video = document.getElementById('camera-video');
-      if (video) { video.srcObject = null; }
-
-      document.getElementById('camera-container').style.display = 'none';
-      document.getElementById('camera-status').style.display = 'none';
-
-      const btn = document.getElementById('camera-scan-btn');
-      if (btn) {
-        btn.innerHTML = '<i class="ti ti-camera"></i> 📱 Mobile Camera se Scan';
-        btn.style.background = 'linear-gradient(135deg,#16a663,#0c7c47)';
-      }
-    };
-
-    function playBeep() {
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.frequency.value = 1200;
-        gain.gain.setValueAtTime(0.3, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.15);
-      } catch(e) {}
-    }
-
-    // Physical scanner ke liye — page pe kahan bhi scan karo, input focus ho jaye
-    document.addEventListener('keydown', function(e) {
-      const activeEl = document.activeElement;
-      const isTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT');
-      const scannerInput = document.getElementById('scanner-input');
-      if (!scannerInput) return;
-
-      // Sirf Google Sheet tab active hone pe aur koi aur input focused na ho
-      const spreadPage = document.getElementById('page-spreadreport');
-      if (!spreadPage || !spreadPage.classList.contains('active')) return;
-      if (isTyping && activeEl !== scannerInput) return;
-      if (!isTyping && e.key.length === 1) {
-        scannerInput.focus();
       }
     });
 
@@ -3929,11 +4158,18 @@
       gap: 14px;
       margin-bottom: 14px;
       flex-wrap: wrap;
+      padding: 10px;
+      background: rgba(255, 255, 255, .72);
+      border: 1px solid rgba(22, 99, 166, .1);
+      border-radius: var(--radius);
+      box-shadow: 0 12px 28px rgba(24, 34, 48, .05);
     }
 
     .search-wrap {
       position: relative;
-      width: min(390px, 100%);
+      flex: 1 1 280px;
+      width: min(430px, 100%);
+      min-width: 240px;
     }
 
     .search-wrap i {
@@ -3955,7 +4191,7 @@
       border-radius: var(--radius);
       background: #fff;
       color: var(--text);
-      min-height: 40px;
+      min-height: 42px;
       padding: 9px 11px;
       outline: none;
       transition: border-color .15s, box-shadow .15s;
@@ -3987,11 +4223,14 @@
       font-size: 13px;
       font-weight: 700;
       white-space: nowrap;
-      transition: background .15s, border-color .15s, transform .15s;
+      box-shadow: 0 4px 10px rgba(24, 34, 48, .04);
+      transition: background .15s, border-color .15s, transform .15s, box-shadow .15s;
     }
 
     .btn:hover {
       background: var(--panel-soft);
+      border-color: #c9d5e2;
+      box-shadow: 0 8px 16px rgba(24, 34, 48, .07);
     }
 
     .btn:active {
@@ -3999,9 +4238,10 @@
     }
 
     .btn.primary {
-      background: var(--blue);
+      background: linear-gradient(135deg, var(--blue), var(--blue-dark));
       color: #fff;
       border-color: var(--blue);
+      box-shadow: 0 10px 22px rgba(22, 99, 166, .18);
     }
 
     .btn.primary:hover {
@@ -4027,6 +4267,31 @@
     .btn.icon {
       width: 34px;
       padding: 0;
+    }
+
+    .action-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-items: center;
+      flex: 1 1 320px;
+    }
+
+    .action-row .btn {
+      flex: 0 1 auto;
+    }
+
+    .btn.success {
+      background: linear-gradient(135deg, #14845f, #0d6f4f);
+      border-color: #14845f;
+      color: #fff;
+    }
+
+    .btn.warning {
+      background: linear-gradient(135deg, #b86b12, #93530d);
+      border-color: #b86b12;
+      color: #fff;
     }
 
     .return-filter-bar {
@@ -4529,7 +4794,7 @@
     }
 
     .invoice-paper::before {
-      content: "ADIXION";
+      content: attr(data-watermark);
       position: absolute;
       top: 50%;
       left: 50%;
@@ -4791,6 +5056,232 @@
       height: 6px;
     }
 
+    /* Simple clean invoice */
+    .invoice-paper {
+      background: #fff;
+      border: 1px solid #d8e1ea;
+      border-radius: 8px;
+      box-shadow: none;
+      overflow: hidden;
+      color: #111827;
+    }
+
+    .invoice-paper::before,
+    .inv-header::after,
+    .inv-footer-stripe {
+      display: none;
+    }
+
+    .inv-header {
+      background: #fff;
+      color: #111827;
+      padding: 24px 28px 18px;
+      border-bottom: 2px solid #111827;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+    }
+
+    .inv-brand-name {
+      color: #111827;
+      font-size: 26px;
+      font-weight: 900;
+      letter-spacing: 0;
+      line-height: 1.15;
+    }
+
+    .inv-brand-sub,
+    .inv-brand-details,
+    .inv-meta-table,
+    .inv-meta-table strong {
+      color: #4b5563;
+    }
+
+    .inv-brand-sub {
+      margin-top: 4px;
+      letter-spacing: 0;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .inv-brand-details {
+      margin-top: 10px;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .inv-title-badge {
+      background: #111827;
+      border: 0;
+      color: #fff;
+      border-radius: 4px;
+      padding: 7px 12px;
+      font-size: 12px;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+    }
+
+    .inv-meta-table {
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .inv-status {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-weight: 900;
+      letter-spacing: .2px;
+    }
+
+    .inv-status-pending {
+      color: #9a4b00 !important;
+      background: #fff3d6;
+      border: 1px solid #f4c36b;
+    }
+
+    .inv-status-paid {
+      color: #05603a !important;
+      background: #dcfae6;
+      border: 1px solid #8ee3ad;
+    }
+
+    .inv-status-cancelled {
+      color: #b42318 !important;
+      background: #fee4e2;
+      border: 1px solid #fda29b;
+    }
+
+    @media print {
+      .inv-status-pending {
+        color: #8a3f00 !important;
+        background: #fff3d6 !important;
+        border-color: #d99a2b !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .inv-status-paid,
+      .inv-status-cancelled {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+
+    .inv-party-row {
+      grid-template-columns: 1.1fr .9fr;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .inv-bill-to,
+    .inv-summary-box {
+      padding: 18px 28px;
+      background: #fff;
+    }
+
+    .inv-bill-to {
+      border-right: 1px solid #e5e7eb;
+    }
+
+    .inv-section-label {
+      color: #6b7280;
+      letter-spacing: .8px;
+      font-size: 10px;
+      margin-bottom: 7px;
+    }
+
+    .inv-party-name {
+      color: #111827;
+      font-size: 16px;
+    }
+
+    .inv-party-detail {
+      color: #4b5563;
+      line-height: 1.6;
+    }
+
+    .inv-amount-big {
+      color: #111827;
+      font-size: 24px;
+      margin-bottom: 10px;
+    }
+
+    .inv-amount-row {
+      color: #374151;
+      font-size: 12px;
+      padding: 3px 0;
+    }
+
+    .inv-items-wrap {
+      padding: 0 28px;
+      margin: 18px 0;
+    }
+
+    .inv-table {
+      border: 1px solid #e5e7eb;
+      font-size: 12px;
+    }
+
+    .inv-table thead tr {
+      background: #f3f4f6;
+    }
+
+    .inv-table thead th {
+      background: #f3f4f6;
+      color: #374151;
+      padding: 9px 10px;
+      border-bottom: 1px solid #d1d5db;
+      letter-spacing: 0;
+    }
+
+    .inv-table tbody tr:nth-child(even),
+    .inv-table tbody tr:hover {
+      background: #fff;
+    }
+
+    .inv-table tbody td {
+      color: #111827;
+      padding: 9px 10px;
+      border-bottom: 1px solid #edf0f3;
+    }
+
+    .inv-table tfoot td {
+      padding: 8px 10px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .inv-table tfoot tr.grand-total td {
+      color: #111827;
+      border-top: 2px solid #111827;
+      font-size: 14px;
+      padding-top: 9px;
+    }
+
+    .inv-bottom {
+      border-top: 1px solid #e5e7eb;
+      grid-template-columns: 1fr .9fr;
+    }
+
+    .inv-sign-box {
+      padding: 18px 28px;
+    }
+
+    .inv-sign-line {
+      margin-top: 34px;
+    }
+
+    .inv-terms {
+      background: #f9fafb;
+      border-top: 1px solid #e5e7eb;
+      color: #4b5563;
+      padding: 12px 28px;
+    }
+
+    .inv-terms strong {
+      color: #111827;
+      letter-spacing: 0;
+    }
+
     .invoice-note {
       margin-top: 14px;
       color: var(--muted);
@@ -4935,8 +5426,8 @@
 
     .quick-add-row {
       display: grid;
-      grid-template-columns: 176px minmax(260px, 1fr) 168px auto;
-      gap: 16px;
+      grid-template-columns: minmax(260px, 1fr) 140px auto;
+      gap: 12px;
       margin-bottom: 18px;
     }
 
@@ -5172,6 +5663,234 @@
       background: transparent;
       box-shadow: none;
       color: #30435d;
+    }
+
+    /* Visual polish layer */
+    .app {
+      grid-template-columns: 268px minmax(0, 1fr);
+      background:
+        linear-gradient(180deg, #f6f9fc 0%, #eef6f2 100%);
+    }
+
+    .sidebar {
+      background: linear-gradient(180deg, #ffffff 0%, #f5f9fd 58%, #f0fbf5 100%);
+      border-right: 1px solid #dce7f1;
+      box-shadow: 8px 0 28px rgba(20, 50, 80, .06);
+    }
+
+    .brand {
+      padding: 26px 24px 22px;
+      background: linear-gradient(135deg, #f7fbff 0%, #eefaf5 100%);
+    }
+
+    .logo {
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+
+    .logo-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #1663a6, #0f7f68);
+      box-shadow: 0 12px 24px rgba(22, 99, 166, .22);
+    }
+
+    .brand small {
+      margin-top: 10px;
+      color: #52677e;
+      line-height: 1.4;
+    }
+
+    .nav {
+      padding: 10px 14px 20px;
+    }
+
+    .nav-section {
+      padding: 20px 12px 8px;
+      color: #7a8ca3;
+      font-size: 11px;
+      letter-spacing: 0;
+    }
+
+    .nav-item {
+      min-height: 46px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      color: #243b53;
+      font-size: 14px;
+      font-weight: 650;
+      border: 1px solid transparent;
+    }
+
+    .nav-item i {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: #edf5ff;
+      color: #1663a6;
+      font-size: 18px;
+    }
+
+    .nav-item:hover {
+      background: #ffffff;
+      border-color: #d7e5f2;
+      box-shadow: 0 10px 20px rgba(22, 99, 166, .08);
+    }
+
+    .nav-item.active {
+      background: linear-gradient(135deg, #1663a6 0%, #12805d 100%);
+      color: #fff;
+      border-color: transparent;
+      box-shadow: 0 14px 26px rgba(22, 99, 166, .22);
+    }
+
+    .nav-item.active i {
+      background: rgba(255, 255, 255, .18);
+      color: #fff;
+    }
+
+    .nav-item[data-page="spreadreport"] {
+      margin: 6px 0 0 !important;
+      width: 100% !important;
+      border-radius: 8px !important;
+      background: linear-gradient(135deg, #1663a6, #0f7f68) !important;
+      box-shadow: 0 14px 26px rgba(22, 99, 166, .2);
+    }
+
+    .topbar {
+      min-height: 86px;
+      padding: 18px 32px;
+      background: rgba(255, 255, 255, .94);
+      border-bottom: 1px solid #dfe9f2;
+      box-shadow: 0 10px 30px rgba(20, 50, 80, .04);
+    }
+
+    .topbar h1 {
+      font-size: 23px;
+      font-weight: 850;
+      color: #1d2939;
+    }
+
+    .topbar p {
+      margin-top: 7px;
+      color: #667085;
+      font-size: 13px;
+    }
+
+    #liveTime {
+      font-size: 32px;
+      color: #1663a6;
+      letter-spacing: 0;
+    }
+
+    #liveDate {
+      font-size: 13px;
+      color: #667085;
+    }
+
+    .user-pill {
+      min-height: 40px;
+      padding: 8px 15px;
+      border-color: #d8e4ee;
+      box-shadow: 0 6px 16px rgba(24, 34, 48, .04);
+    }
+
+    .content {
+      padding: 20px 24px 34px;
+      width: min(1440px, 100%);
+    }
+
+    .toolbar {
+      padding: 14px;
+      margin-bottom: 18px;
+      background: rgba(255, 255, 255, .86);
+      border-color: #dfe9f2;
+      box-shadow: 0 14px 34px rgba(24, 34, 48, .06);
+    }
+
+    .search-wrap {
+      max-width: 720px;
+    }
+
+    .search-wrap input,
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      border-color: #d6e2ee;
+      min-height: 44px;
+    }
+
+    .search-wrap input {
+      font-size: 14px;
+      padding-left: 43px;
+    }
+
+    .btn {
+      min-height: 42px;
+      border-color: #d6e2ee;
+      border-radius: 8px;
+      font-size: 13px;
+      box-shadow: 0 7px 16px rgba(24, 34, 48, .05);
+    }
+
+    .btn.primary {
+      background: linear-gradient(135deg, #1663a6, #0f6f9f);
+      box-shadow: 0 12px 22px rgba(22, 99, 166, .2);
+    }
+
+    .card {
+      border-color: #dfe9f2;
+      border-radius: 8px;
+      box-shadow: 0 18px 42px rgba(24, 34, 48, .07);
+    }
+
+    .table-wrap {
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    table {
+      font-size: 13px;
+      border-collapse: separate;
+      border-spacing: 0;
+    }
+
+    th {
+      padding: 14px 16px;
+      background: #f5f8fb;
+      color: #64748b;
+      font-size: 12px;
+      border-bottom: 1px solid #e4edf5;
+    }
+
+    td {
+      padding: 14px 16px;
+      border-bottom: 1px solid #eef3f7;
+    }
+
+    tbody tr:hover td {
+      background: #f8fbff;
+    }
+
+    .badge {
+      min-height: 26px;
+      padding: 4px 11px;
+      font-weight: 850;
+    }
+
+    .btn.icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      color: #1663a6;
+      background: #fff;
+    }
+
+    .btn.icon.danger {
+      color: var(--red);
     }
 
     .toast-container {
@@ -5536,6 +6255,329 @@
     .stock-packing.empty {
       color: var(--red);
     }
+
+    /* ─── MOBILE APP MODE ─────────────────────────────────────────────── */
+    @media (max-width: 760px) {
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+        background: #f3f8fb;
+      }
+
+      .auth-screen {
+        min-height: 100dvh;
+        padding: 16px;
+        background: linear-gradient(180deg, #e8f3fb 0%, #f6fbf8 100%);
+      }
+
+      .auth-card {
+        width: min(100%, 430px);
+        border-radius: 16px;
+        padding: 22px;
+        box-shadow: 0 18px 48px rgba(20, 50, 80, .16);
+      }
+
+      .app {
+        display: block;
+        height: 100dvh;
+        overflow: hidden;
+        background: #f3f8fb;
+      }
+
+      .main {
+        height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .topbar {
+        min-height: auto;
+        padding: calc(12px + env(safe-area-inset-top)) 14px 10px;
+        align-items: flex-start;
+        gap: 10px;
+        border-bottom: 1px solid #dbe8f1;
+        box-shadow: 0 8px 24px rgba(20, 50, 80, .06);
+      }
+
+      .topbar > div:first-child {
+        min-width: 0;
+      }
+
+      .topbar h1 {
+        font-size: 20px;
+        line-height: 1.15;
+      }
+
+      .topbar p {
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      .live-header-clock {
+        display: none;
+      }
+
+      .topbar > div:last-child {
+        gap: 6px !important;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .user-pill {
+        max-width: 148px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+
+      #logout-btn-header,
+      #exit-emp-btn-header {
+        min-height: 36px;
+        padding: 7px 10px;
+        font-size: 12px;
+      }
+
+      .content {
+        flex: 1;
+        width: 100%;
+        padding: 12px 12px calc(96px + env(safe-area-inset-bottom));
+        overflow-y: auto;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .sidebar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 80;
+        height: auto;
+        max-height: none;
+        border: 0;
+        border-top: 1px solid #d6e4ef;
+        background: rgba(255, 255, 255, .96);
+        backdrop-filter: blur(18px);
+        box-shadow: 0 -14px 34px rgba(20, 50, 80, .14);
+        padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+        display: block;
+      }
+
+      .sidebar .brand,
+      .sidebar .nav-section,
+      #sidebar-emp-section {
+        display: none !important;
+      }
+
+      .nav {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(72px, 1fr);
+        gap: 6px;
+        padding: 0;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+
+      .nav::-webkit-scrollbar {
+        display: none;
+      }
+
+      .nav-item,
+      .nav-item[data-page="spreadreport"] {
+        min-height: 58px !important;
+        width: auto !important;
+        margin: 0 !important;
+        padding: 6px 8px !important;
+        border-radius: 14px !important;
+        display: flex !important;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        font-size: 11px;
+        line-height: 1.1;
+        text-align: center;
+        box-shadow: none !important;
+        white-space: normal;
+      }
+
+      .nav-item i {
+        width: 26px;
+        height: 26px;
+        font-size: 19px;
+        border-radius: 10px;
+      }
+
+      .nav-item .badge {
+        display: none;
+      }
+
+      .toolbar {
+        padding: 10px;
+        border-radius: 14px;
+        gap: 10px;
+        margin-bottom: 12px;
+        background: #fff;
+      }
+
+      .search-wrap {
+        max-width: none;
+        width: 100%;
+      }
+
+      .search-wrap input,
+      .form-group input,
+      .form-group select,
+      .form-group textarea {
+        min-height: 44px;
+        font-size: 16px;
+      }
+
+      .action-row {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .action-row .btn,
+      .toolbar .btn {
+        width: 100%;
+        min-height: 42px;
+        justify-content: center;
+        padding: 9px 10px;
+        font-size: 12px;
+      }
+
+      .dashboard-grid,
+      .split-grid,
+      .form-row,
+      .invoice-top-grid {
+        grid-template-columns: 1fr !important;
+        gap: 12px;
+      }
+
+      .card {
+        border-radius: 14px;
+        box-shadow: 0 10px 26px rgba(20, 50, 80, .08);
+      }
+
+      .card-header {
+        padding: 14px;
+      }
+
+      .card-title {
+        font-size: 15px;
+      }
+
+      .table-wrap {
+        border-radius: 12px;
+        overflow-x: auto;
+      }
+
+      table {
+        min-width: 680px;
+        font-size: 12px;
+      }
+
+      th,
+      td {
+        padding: 10px 12px;
+      }
+
+      .modal-bg.open {
+        align-items: stretch;
+        padding: 0;
+      }
+
+      .modal {
+        width: 100% !important;
+        max-width: none !important;
+        height: 100dvh;
+        max-height: 100dvh;
+        border-radius: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .modal-head {
+        padding: calc(12px + env(safe-area-inset-top)) 14px 12px;
+      }
+
+      .modal-body,
+      .invoice-create-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 14px;
+      }
+
+      .modal-footer {
+        padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+        background: #fff;
+        border-top: 1px solid #e5edf5;
+      }
+
+      .modal-footer .btn {
+        flex: 1;
+        min-height: 44px;
+        justify-content: center;
+      }
+
+      .create-invoice-head {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        padding: calc(12px + env(safe-area-inset-top)) 14px 12px;
+      }
+
+      .create-invoice-head h2 {
+        font-size: 18px;
+      }
+
+      .bill-number {
+        min-width: 0;
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .invoice-save-top {
+        width: 100%;
+      }
+
+      .quick-add-row {
+        grid-template-columns: 1fr 88px;
+      }
+
+      .quick-add-row .btn {
+        grid-column: 1 / -1;
+      }
+
+      .items-table {
+        min-width: 760px;
+      }
+
+      .total-section {
+        border-radius: 14px;
+        padding: 12px;
+      }
+
+      .return-filter-bar,
+      .filter-type-group,
+      .filter-platform-group {
+        border-radius: 14px;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        scrollbar-width: none;
+      }
+
+      .filter-type-group::-webkit-scrollbar,
+      .filter-platform-group::-webkit-scrollbar {
+        display: none;
+      }
+    }
   </style>
 </head>
 
@@ -5560,12 +6602,12 @@
 
       <div class="form-group" id="auth-email-row">
         <label>Email</label>
-        <input type="email" id="auth-email" autocomplete="email" placeholder="name@example.com">
+        <input type="email" id="auth-email" autocomplete="off" placeholder="name@example.com" onkeydown="handleAuthEnter(event)">
       </div>
 
       <div class="form-group" id="auth-emp-user-row" style="display:none">
         <label>Employee User ID</label>
-        <input type="text" id="auth-emp-username" placeholder="Employee User ID">
+        <input type="text" id="auth-emp-username" autocomplete="off" placeholder="Employee User ID" onkeydown="handleAuthEnter(event)">
       </div>
 
       <div class="form-group" id="auth-question-row" style="display:none">
@@ -5575,17 +6617,17 @@
 
       <div class="form-group" id="auth-answer-row" style="display:none">
         <label>Secret Answer</label>
-        <input type="text" id="auth-answer" autocomplete="off" placeholder="Answer">
+        <input type="text" id="auth-answer" autocomplete="off" placeholder="Answer" onkeydown="handleAuthEnter(event)">
       </div>
 
       <div class="form-group">
         <label>Password</label>
-        <input type="password" id="auth-pass" autocomplete="current-password" placeholder="Password">
+        <input type="password" id="auth-pass" autocomplete="new-password" data-lpignore="true" data-form-type="other" placeholder="Password" onkeydown="handleAuthEnter(event)">
       </div>
 
       <div class="form-group" id="auth-otp-row" style="display:none">
         <label>OTP</label>
-        <input type="text" id="auth-otp" inputmode="numeric" placeholder="6 digit OTP">
+        <input type="text" id="auth-otp" inputmode="numeric" placeholder="6 digit OTP" onkeydown="handleAuthEnter(event)">
       </div>
 
       <div class="auth-actions">
@@ -5632,8 +6674,11 @@
         <button class="nav-item" data-page="employees" onclick="handleEmployeesNavClick(this)"><i
             class="ti ti-users-group"></i>Employees <span id="emp-premium-badge" class="badge pending"
             style="margin-left: auto; font-size: 10px; padding: 2px 6px;">PREMIUM</span></button>
+        <div class="nav-section">Invoice</div>
+        <button class="nav-item" data-page="business" onclick="showPage('business',this)"><i
+            class="ti ti-building"></i>Business Profile</button>
         <div class="nav-section">Reports</div>
-        <button class="nav-item" data-page="spreadreport" onclick="showPage('spreadreport',this)" style="background:linear-gradient(135deg,#1a73e8,#0d47a1);color:#fff;font-weight:800;border-radius:8px;margin:4px 8px;width:calc(100% - 16px);"><i class="ti ti-table"></i>📊 Spreadsheet Report</button>
+        <button class="nav-item" data-page="spreadreport" onclick="showPage('spreadreport',this)"><i class="ti ti-table"></i>Spreadsheet Report</button>
       </nav>
       <div class="employee-nav-section" id="sidebar-emp-section" style="display:none">
         <button class="exit-emp-btn" onclick="logoutEmployee()"
@@ -5669,10 +6714,6 @@
 
         <!-- DASHBOARD -->
         <div class="page active" id="page-dashboard">
-          <div class="toolbar">
-            <div></div>
-            <button class="btn" onclick="exportMainReport()" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i>Main Report Excel</button>
-          </div>
           <div class="dashboard-grid" id="dash-stats"></div>
           <div class="split-grid">
             <div class="card">
@@ -5713,10 +6754,12 @@
           <div class="toolbar">
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text"
                 placeholder="Search invoices..." oninput="filterTable('sales-table',this.value)"></div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <div class="action-row">
               <button class="btn primary" onclick="openModal('sale')"><i class="ti ti-plus"></i>New Sale
                 Invoice</button>
-              <button class="btn" onclick="exportSalesReport()" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i>Report Excel</button>
+              <button class="btn" onclick="exportGstSummaryReport()" style="border-color:var(--green);color:var(--green);"><i class="ti ti-receipt-tax"></i>GST Report</button>
+              <button class="btn" onclick="exportGstr1Report()" style="border-color:#1663a6;color:#1663a6;"><i class="ti ti-file-analytics"></i>GSTR-1</button>
+              <button class="btn" onclick="exportGstr3bReport()" style="border-color:#7c3aed;color:#7c3aed;"><i class="ti ti-calculator"></i>GSTR-3B</button>
               <button class="btn danger" id="delete-selected-sales-btn" onclick="deleteSelectedSales()" style="display:none;border-color:var(--red);color:var(--red);background:#fff3f3;">
                 <i class="ti ti-trash"></i>Selected Delete (<span id="selected-sale-count">0</span>)
               </button>
@@ -5740,23 +6783,17 @@
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text"
                 placeholder="Search by Order ID / AWB..."
                 oninput="filterTable('returns-table',this.value)"></div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <div class="action-row">
               <button class="btn primary" onclick="openReturnModal()"><i class="ti ti-plus"></i>Log New
                 Return</button>
-              <button class="btn primary" onclick="openBulkReturnModal()" style="background:var(--green); border-color:var(--green);">
+              <button class="btn success" onclick="openBulkReturnModal()">
                 <i class="ti ti-list"></i>Bulk Add Returns
               </button>
-              <button class="btn primary" onclick="openOrderMatchModal()" style="background:var(--amber); border-color:var(--amber);">
+              <button class="btn warning" onclick="openOrderMatchModal()">
                 <i class="ti ti-file-spreadsheet"></i> Match New Orders
               </button>
-              <button class="btn" onclick="exportReturnsReport('all')" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i>All Report</button>
-              <button class="btn" onclick="exportReturnsReport('rto')" style="border-color:var(--amber);color:var(--amber);"><i class="ti ti-download"></i>RTO Report</button>
-              <button class="btn" onclick="exportReturnsReport('customer')" style="border-color:var(--green);color:var(--green);"><i class="ti ti-download"></i>Customer Return Report</button>
               <button class="btn danger" id="delete-selected-returns-btn" onclick="deleteSelectedReturns()" style="display:none;">
                 <i class="ti ti-trash"></i>Selected Delete (<span id="selected-return-count">0</span>)
-              </button>
-              <button class="btn danger" onclick="deleteAllVisibleReturns()" style="border-color:var(--red);color:var(--red);background:#fff3f3;">
-                <i class="ti ti-trash"></i>Delete All
               </button>
             </div>
           </div>
@@ -5802,10 +6839,11 @@
           <div class="toolbar">
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text"
                 placeholder="Search bills..." oninput="filterTable('purchase-table',this.value)"></div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <div class="action-row">
               <button class="btn primary" onclick="openModal('purchase')"><i class="ti ti-plus"></i>New Purchase
                 Bill</button>
-              <button class="btn" onclick="exportPurchasesReport()" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i>Report Excel</button>
+              <button class="btn" onclick="exportGstSummaryReport()" style="border-color:var(--green);color:var(--green);"><i class="ti ti-receipt-tax"></i>GST Report</button>
+              <button class="btn" onclick="exportGstr3bReport()" style="border-color:#7c3aed;color:#7c3aed;"><i class="ti ti-calculator"></i>GSTR-3B</button>
             </div>
           </div>
           <div class="card">
@@ -5826,10 +6864,9 @@
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text"
                 placeholder="Search customers..." oninput="filterTable('customers-table',this.value)">
             </div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <div class="action-row">
               <button class="btn primary" onclick="openPartyModal('customer')"><i class="ti ti-plus"></i>Add
                 Customer</button>
-              <button class="btn" onclick="exportCustomersReport()" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i>Report Excel</button>
             </div>
           </div>
           <div class="card">
@@ -5849,18 +6886,16 @@
           <div class="toolbar">
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text"
                 placeholder="Search products..." oninput="filterTable('products-table',this.value)"></div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <div class="action-row">
               <button class="btn primary" onclick="openProductModal()"><i class="ti ti-plus"></i>Add Product</button>
-              <button class="btn primary" onclick="openProductExcelImport()" style="background:var(--green);border-color:var(--green);"><i class="ti ti-file-spreadsheet"></i>Excel se Import</button>
-              <button class="btn" onclick="exportProductsToExcel()" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i>Excel Export</button>
-              <button class="btn danger" onclick="deleteAllProducts()" style="border-color:var(--red);color:var(--red);background:#fff3f3;"><i class="ti ti-trash"></i>Delete All</button>
+              <button class="btn success" onclick="openProductExcelImport()"><i class="ti ti-file-spreadsheet"></i>Excel se Import</button>
             </div>
           </div>
           <div class="card">
             <div class="table-wrap">
               <table id="products-table">
                 <thead>
-                  <tr><th>#</th><th>Product</th><th>Unit</th><th>Sale Price</th><th>Purchase Price</th><th>GST</th><th>Stock</th><th>Actions</th></tr>
+                  <tr><th>#</th><th>Product</th><th>HSN/SAC</th><th>Unit</th><th>Sale Price</th><th>Purchase Price</th><th>GST</th><th>Stock</th><th>Actions</th></tr>
                 </thead>
                 <tbody id="products-tbody"></tbody>
               </table>
@@ -5873,8 +6908,10 @@
           <div class="toolbar">
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text"
                 placeholder="Search vendors..." oninput="filterTable('vendors-table',this.value)"></div>
-            <button class="btn primary" onclick="openPartyModal('vendor')"><i class="ti ti-plus"></i>Add
-              Vendor</button>
+            <div class="action-row">
+              <button class="btn primary" onclick="openPartyModal('vendor')"><i class="ti ti-plus"></i>Add
+                Vendor</button>
+            </div>
           </div>
           <div class="card">
             <div class="table-wrap">
@@ -5894,8 +6931,10 @@
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text"
                 placeholder="Search employees..." oninput="filterTable('employees-table',this.value)">
             </div>
-            <button class="btn primary" onclick="openEmpSetupModal()"><i class="ti ti-plus"></i>Add
-              Employee</button>
+            <div class="action-row">
+              <button class="btn primary" onclick="openEmpSetupModal()"><i class="ti ti-plus"></i>Add
+                Employee</button>
+            </div>
           </div>
           <div class="card">
             <div class="table-wrap">
@@ -5905,6 +6944,48 @@
                 </thead>
                 <tbody id="employees-tbody"></tbody>
               </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- BUSINESS PROFILE -->
+        <div class="page" id="page-business">
+          <div class="split-grid">
+            <div class="card">
+              <div class="card-header">
+                <div><span class="card-title">Company Details</span><span class="card-subtitle">Ye details invoice par print hongi</span></div>
+              </div>
+              <div style="padding:18px;display:grid;gap:14px;">
+                <div class="form-row">
+                  <div class="form-group"><label>Company Name</label><input type="text" id="biz-name" placeholder="Apni company ka naam"></div>
+                  <div class="form-group"><label>Invoice Tagline</label><input type="text" id="biz-tagline" placeholder="Business Invoice"></div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group"><label>GSTIN</label><input type="text" id="biz-gstin" placeholder="09ABCDE1234F1Z5" oninput="document.getElementById('biz-state').value = gstStateCodeFromGSTIN(this.value) || document.getElementById('biz-state').value"></div>
+                  <div class="form-group"><label>State Code</label><input type="text" id="biz-state" maxlength="2" placeholder="09"></div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group"><label>Phone</label><input type="text" id="biz-phone" placeholder="+91 00000 00000"></div>
+                  <div class="form-group"><label>Email</label><input type="email" id="biz-email" placeholder="company@example.com"></div>
+                </div>
+                <div class="form-group"><label>Address</label><textarea id="biz-address" rows="4" placeholder="Shop/Office, City, State, PIN"></textarea></div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+                  <button class="btn" onclick="renderBusinessProfile()">Reset</button>
+                  <button class="btn primary" onclick="saveBusinessProfile()"><i class="ti ti-device-floppy"></i>Save Company Details</button>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <div><span class="card-title">Invoice Preview Header</span><span class="card-subtitle">Save ke baad invoice mein yahi dikhega</span></div>
+              </div>
+              <div style="padding:22px;">
+                <div style="background:linear-gradient(135deg,#1663a6,#0f7f68);color:#fff;border-radius:8px;padding:22px;min-height:180px;">
+                  <div id="biz-preview-name" style="font-size:28px;font-weight:900;letter-spacing:0;margin-bottom:10px;">Your Company Name</div>
+                  <div id="biz-preview-meta" style="font-size:14px;line-height:1.8;color:rgba(255,255,255,.88)">Phone / Email</div>
+                </div>
+                <p style="margin-top:14px;color:var(--muted);font-size:13px;line-height:1.6;">Tip: Customer/Vendor GSTIN aur company GSTIN ke state code se invoice mein CGST+SGST ya IGST auto select hoga.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -5929,103 +7010,10 @@
           <!-- Summary Cards -->
           <div id="ss-summary-cards" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;"></div>
 
-          <!-- Main layout: Scanner (left) + Sheet (right) -->
+          <!-- Main sheet layout -->
           <div style="display:flex;gap:16px;align-items:flex-start;">
-
-            <!-- ── BARCODE SCANNER PANEL (hidden) ── -->
-            <div class="card" style="width:280px;min-width:260px;flex-shrink:0;padding:0;overflow:hidden;display:none;">
-              <!-- Header -->
-              <div style="background:linear-gradient(135deg,#1663a6,#0c477c);padding:14px 16px;display:flex;align-items:center;gap:8px;">
-                <i class="ti ti-barcode" style="color:#fff;font-size:20px;"></i>
-                <span style="color:#fff;font-weight:800;font-size:15px;">Barcode Scanner</span>
-              </div>
-              <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
-
-                <!-- Camera Scanner -->
-                <div>
-                  <button onclick="toggleCameraScanner()" id="camera-scan-btn"
-                    style="width:100%;padding:11px;background:linear-gradient(135deg,#16a663,#0c7c47);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
-                    <i class="ti ti-camera"></i> 📱 Mobile Camera se Scan
-                  </button>
-                  <!-- Camera preview -->
-                  <div id="camera-container" style="display:none;margin-top:10px;position:relative;border-radius:10px;overflow:hidden;background:#000;">
-                    <video id="camera-video" style="width:100%;border-radius:10px;display:block;" autoplay muted playsinline></video>
-                    <canvas id="camera-canvas" style="display:none;"></canvas>
-                    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:70%;height:40%;border:3px solid #00ff88;border-radius:8px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,0.35);"></div>
-                    <div style="position:absolute;bottom:8px;left:0;right:0;text-align:center;">
-                      <span style="background:rgba(0,0,0,0.6);color:#fff;font-size:11px;padding:4px 10px;border-radius:20px;">Barcode ko green box mein rakhein</span>
-                    </div>
-                    <button onclick="stopCameraScanner()" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:30px;height:30px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button>
-                  </div>
-                  <div id="camera-status" style="display:none;margin-top:6px;font-size:12px;color:var(--muted);text-align:center;"></div>
-                </div>
-
-                <!-- Divider -->
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <div style="flex:1;height:1px;background:var(--line);"></div>
-                  <span style="font-size:11px;color:var(--muted);font-weight:600;">YA MANUALLY</span>
-                  <div style="flex:1;height:1px;background:var(--line);"></div>
-                </div>
-
-                <!-- Scan input -->
-                <div>
-                  <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:6px;">Barcode / Code</label>
-                  <div style="display:flex;gap:6px;">
-                    <input type="text" id="scanner-input"
-                      placeholder="Scan ya type karein..."
-                      style="flex:1;border:2px solid var(--blue);border-radius:8px;padding:9px 10px;font-size:14px;font-weight:600;outline:none;"
-                      onkeydown="if(event.key==='Enter') sendBarcode()"
-                      autofocus>
-                  </div>
-                  <p style="font-size:11px;color:var(--muted);margin-top:5px;">💡 Physical scanner se scan karo ya type karke Enter dabao</p>
-                </div>
-
-                <!-- Quantity -->
-                <div>
-                  <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:6px;">Quantity</label>
-                  <input type="number" id="scanner-qty" value="1" min="1"
-                    style="width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;font-weight:600;">
-                </div>
-
-                <!-- Send button -->
-                <button onclick="sendBarcode()" id="scanner-send-btn"
-                  style="width:100%;padding:11px;background:linear-gradient(135deg,#1663a6,#0c477c);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
-                  <i class="ti ti-send"></i> Google Sheet mein Send
-                </button>
-
-                <!-- Status message -->
-                <div id="scanner-status" style="display:none;padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;"></div>
-
-                <!-- Auto-focus toggle -->
-                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);cursor:pointer;">
-                  <input type="checkbox" id="scanner-autofocus" checked onchange="toggleScannerAutofocus()">
-                  Auto-focus (har scan ke baad input clear ho)
-                </label>
-
-                <!-- Scan log -->
-                <div>
-                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                    <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Recent Scans</label>
-                    <button onclick="clearScanLog()" style="font-size:11px;color:var(--muted);background:none;border:none;cursor:pointer;">Clear</button>
-                  </div>
-                  <div id="scan-log" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;">
-                    <p style="font-size:12px;color:var(--muted);text-align:center;padding:12px 0;">Abhi koi scan nahi hua</p>
-                  </div>
-                </div>
-
-              </div>
-            </div>
-
-            <!-- ── GOOGLE SHEET / TABLE ── -->
+<!-- ── GOOGLE SHEET / TABLE ── -->
             <div style="flex:1;min-width:0;">
-              <!-- Scanner Button — sheet ke upar -->
-              <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;">
-                <button onclick="openScannerPopup()"
-                  style="display:inline-flex;align-items:center;gap:7px;padding:9px 18px;background:linear-gradient(135deg,#1663a6,#0c477c);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(22,99,166,0.3);">
-                  <i class="ti ti-barcode" style="font-size:18px;"></i> Scan Barcode
-                </button>
-                <span style="font-size:12px;color:var(--muted);">📱 Camera se scan karein aur sheet mein save ho</span>
-              </div>
               <div class="card" style="overflow:auto;">
                 <div id="ss-table-container" style="min-width:0;"></div>
               </div>
@@ -6072,7 +7060,8 @@
         </div>
         <div style="margin-bottom:12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
           <button class="btn sm primary" onclick="addBulkRow()"><i class="ti ti-plus"></i> Add Row</button>
-          <button class="btn sm" onclick="exportBulkReturnsToExcel()" style="border-color:var(--blue);color:var(--blue);"><i class="ti ti-download"></i> Export Excel</button>
+          <input type="file" id="bulk-return-import-file" accept=".csv,.xls,.xlsx,.txt" onchange="handleBulkReturnImportFile(this)" style="display:none;">
+          <button class="btn sm" onclick="document.getElementById('bulk-return-import-file').click()" style="border-color:var(--green);color:var(--green);"><i class="ti ti-upload"></i> Import Excel</button>
           <button class="btn sm danger" onclick="clearBulkRows()"><i class="ti ti-trash"></i> Clear All</button>
           <span style="font-size:12px; color:var(--muted); margin-left:8px;">Fill multiple returns and click Save All</span>
         </div>
@@ -6104,7 +7093,7 @@
         <div class="invoice-top-grid">
           <div class="soft-panel">
             <div class="panel-label-row"><label id="party-label" for="f-party">Select Customer</label><button class="link-btn" onclick="openPartyModal('customer')">+ Create Customer</button></div>
-            <input type="text" id="f-party" list="party-list" placeholder="Search customers...">
+            <input type="text" id="f-party" list="party-list" placeholder="Search customers..." oninput="updateTotals()">
             <datalist id="party-list"></datalist><input type="hidden" id="f-phone">
           </div>
           <div class="soft-panel neutral">
@@ -6112,20 +7101,20 @@
               <div class="form-group"><label>Invoice Date</label><input type="date" id="f-date"></div>
               <div class="form-group"><label>Due Date</label><input type="date" id="f-due"></div>
               <div class="form-group"><label>Reference</label><input type="text" id="f-notes" placeholder="Reference note (optional)"></div>
+              <div class="form-group"><label>GST Type</label><select id="f-gst-type" onchange="updateTotals()"><option value="auto">Auto by GSTIN</option><option value="intrastate">CGST + SGST</option><option value="interstate">IGST</option></select></div>
             </div>
           </div>
         </div>
         <datalist id="product-list"></datalist>
         <div class="product-entry">
           <div class="quick-add-row">
-            <input type="text" placeholder="Filter Category">
             <input type="text" list="product-list" id="quick-product" placeholder="Search product...">
             <input type="number" id="quick-qty" min="1" value="1" placeholder="Qty">
             <button class="btn primary" onclick="addQuickProduct()"><i class="ti ti-plus"></i>Add to Bill</button>
           </div>
           <div class="table-wrap">
             <table class="items-table">
-              <thead><tr><th style="width:35%">Product Name</th><th style="width:12%">Quantity</th><th style="width:15%">Unit</th><th style="width:18%">Unit Price</th><th style="width:15%">GST%</th><th></th></tr></thead>
+              <thead><tr><th style="width:28%">Product Name</th><th style="width:12%">HSN/SAC</th><th style="width:10%">Quantity</th><th style="width:12%">Unit</th><th style="width:17%">Unit Price</th><th style="width:13%">GST%</th><th></th></tr></thead>
               <tbody id="items-body"></tbody>
             </table>
           </div>
@@ -6135,7 +7124,11 @@
           <div class="stock-chips" id="stock-chip-list"></div>
         </div>
         <div class="total-section" id="totals-section">
+          <div class="total-row"><span>GST Mode</span><span id="t-gst-type">CGST + SGST</span></div>
           <div class="total-row"><span>Subtotal</span><span id="t-sub">₹0</span></div>
+          <div class="total-row" id="t-cgst-row"><span>CGST</span><span id="t-cgst">₹0</span></div>
+          <div class="total-row" id="t-sgst-row"><span>SGST</span><span id="t-sgst">₹0</span></div>
+          <div class="total-row" id="t-igst-row" style="display:none"><span>IGST</span><span id="t-igst">₹0</span></div>
           <div class="total-row"><span>GST</span><span id="t-gst">₹0</span></div>
           <div class="total-row grand"><span>Total</span><span id="t-total">₹0</span></div>
         </div>
@@ -6166,9 +7159,10 @@
     <div class="modal" style="width:560px">
       <div class="modal-head"><h2 id="product-modal-title">Add Product</h2><button class="btn sm icon" onclick="closeProductModal()"><i class="ti ti-x"></i></button></div>
       <div class="modal-body">
-        <div class="form-row"><div class="form-group"><label>Product Name</label><input type="text" id="pr-name" placeholder="Product / service name"></div><div class="form-group"><label>Unit</label><input type="text" id="pr-unit" placeholder="pcs, kg, box"></div></div>
+        <div class="form-row"><div class="form-group"><label>Product Name</label><input type="text" id="pr-name" placeholder="Product / service name"></div><div class="form-group"><label>HSN/SAC</label><input type="text" id="pr-hsn" placeholder="e.g. 6109"></div></div>
+        <div class="form-row"><div class="form-group"><label>Unit</label><input type="text" id="pr-unit" placeholder="pcs, kg, box"></div><div class="form-group"><label>GST %</label><input type="number" id="pr-gst" min="0" max="100" placeholder="18"></div></div>
         <div class="form-row"><div class="form-group"><label>Sale Price</label><input type="number" id="pr-sale" min="0" placeholder="0"></div><div class="form-group"><label>Purchase Price</label><input type="number" id="pr-purchase" min="0" placeholder="0"></div></div>
-        <div class="form-row" style="margin-bottom:0"><div class="form-group"><label>GST %</label><input type="number" id="pr-gst" min="0" max="100" placeholder="18"></div><div class="form-group"><label>Opening Stock</label><input type="number" id="pr-stock" min="0" placeholder="0"></div></div>
+        <div class="form-row" style="margin-bottom:0"><div class="form-group"><label>Opening Stock</label><input type="number" id="pr-stock" min="0" placeholder="0"></div><div></div></div>
       </div>
       <div class="modal-footer"><button class="btn" onclick="closeProductModal()">Cancel</button><button class="btn primary" onclick="saveProduct()"><i class="ti ti-device-floppy"></i>Save</button></div>
     </div>
@@ -6235,8 +7229,8 @@
     <div class="modal emp-login-modal-shell">
       <div class="emp-login-hero"><i class="ti ti-user-shield"></i><h2>Employee Login</h2><p>Employee User ID aur Password daalein</p></div>
       <div class="modal-body">
-        <div class="form-group" style="margin-bottom:12px"><label>Employee User ID</label><input type="text" id="emp-login-username" placeholder="User ID daalein"></div>
-        <div class="form-group" style="margin-bottom:12px"><label>Employee Password</label><input type="password" id="emp-login-pass" placeholder="Employee password daalein" onkeydown="if(event.key==='Enter')employeeLogin()"></div>
+        <div class="form-group" style="margin-bottom:12px"><label>Employee User ID</label><input type="text" id="emp-login-username" autocomplete="off" placeholder="User ID daalein"></div>
+        <div class="form-group" style="margin-bottom:12px"><label>Employee Password</label><input type="password" id="emp-login-pass" autocomplete="new-password" data-lpignore="true" data-form-type="other" placeholder="Employee password daalein" onkeydown="if(event.key==='Enter')employeeLogin()"></div>
         <p style="font-size:12px;color:var(--muted);margin-top:8px">⚠️ Employee sirf Sale Invoice aur Purchase Bill use kar sakta hai. Baaki sections restricted hain.</p>
         <button class="link-btn" onclick="resetEmployeeCredentialsPrompt()" style="margin-top:12px; font-size:12px; color:var(--blue); font-weight:700;">⚙️ Setup / Change Credentials (Requires Admin Password)</button>
       </div>
@@ -6249,9 +7243,9 @@
     <div class="modal emp-login-modal-shell">
       <div class="emp-login-hero" style="background:linear-gradient(135deg,#ff9500,#ff5e00)"><i class="ti ti-key"></i><h2>Employee Credentials Setup</h2><p>Employee ke liye User ID aur Password banayein</p></div>
       <div class="modal-body">
-        <div class="form-group" style="margin-bottom:12px"><label>Employee User ID (Username)</label><input type="text" id="emp-setup-username" placeholder="Employee User ID (e.g. Rahul123)"></div>
-        <div class="form-group" style="margin-bottom:12px"><label>Naya Employee Password</label><input type="password" id="emp-setup-pass" placeholder="Employee password set karein"></div>
-        <div class="form-group" style="margin-bottom:12px"><label>Confirm Password</label><input type="password" id="emp-setup-confirm" placeholder="Password confirm karein" onkeydown="if(event.key==='Enter')saveEmployeePassword()"></div>
+        <div class="form-group" style="margin-bottom:12px"><label>Employee User ID (Username)</label><input type="text" id="emp-setup-username" autocomplete="off" placeholder="Employee User ID (e.g. Rahul123)"></div>
+        <div class="form-group" style="margin-bottom:12px"><label>Naya Employee Password</label><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="emp-setup-pass" autocomplete="new-password" data-lpignore="true" data-form-type="other" placeholder="Employee password set karein"><button type="button" class="btn sm" title="Show Password" onclick="togglePasswordInput('emp-setup-pass', this)"><i class="ti ti-eye"></i>Show</button></div></div>
+        <div class="form-group" style="margin-bottom:12px"><label>Confirm Password</label><div style="display:flex;gap:8px;align-items:center;"><input type="password" id="emp-setup-confirm" autocomplete="new-password" data-lpignore="true" data-form-type="other" placeholder="Password confirm karein" onkeydown="if(event.key==='Enter')saveEmployeePassword()"><button type="button" class="btn sm" title="Show Password" onclick="togglePasswordInput('emp-setup-confirm', this)"><i class="ti ti-eye"></i>Show</button></div></div>
         <p style="font-size:12px;color:var(--muted)">💡 Ye Credentials employee ko dein. Isse employee login karke kaam kar payega.</p>
       </div>
       <div class="modal-footer"><button class="btn" onclick="closeEmpSetupModal()">Cancel</button><button class="btn primary" onclick="saveEmployeePassword()"><i class="ti ti-device-floppy"></i>Save Credentials</button></div>
@@ -6281,7 +7275,7 @@
       <div class="modal-body" style="padding:20px;">
         <div style="background:#f0f9f4;border:1px dashed var(--green);border-radius:var(--radius);padding:14px;margin-bottom:16px;font-size:13px;">
           <strong>📋 Format Guide:</strong> Excel/CSV file mein ye columns hone chahiye (header row zaroori hai):<br>
-          <code style="background:#e8f5e9;padding:2px 8px;border-radius:4px;font-size:12px;">Product Name, Unit, Sale Price, Purchase Price, GST%, Stock</code><br>
+          <code style="background:#e8f5e9;padding:2px 8px;border-radius:4px;font-size:12px;">Product Name, HSN/SAC, Unit, Sale Price, Purchase Price, GST%, Stock</code><br>
           <span style="color:var(--muted);">Sirf <strong>Product Name</strong> column compulsory hai. Baaki columns optional hain. Column order auto-detect hoga.</span>
         </div>
 
@@ -6294,7 +7288,7 @@
 
         <div style="margin-bottom:14px;">
           <label style="font-weight:700;font-size:13px;display:block;margin-bottom:8px;">Notepad / Excel se copy-paste</label>
-          <textarea id="product-import-paste" rows="6" placeholder="Product Name, Unit, Sale Price, Purchase Price, GST%, Stock&#10;Shirt, pcs, 499, 300, 5, 20&#10;Jeans, pcs, 999, 650, 5, 10" style="border:1px solid var(--line);border-radius:var(--radius);padding:10px;width:100%;font-size:13px;resize:vertical;"></textarea>
+          <textarea id="product-import-paste" rows="6" placeholder="Product Name, HSN/SAC, Unit, Sale Price, Purchase Price, GST%, Stock&#10;Shirt, 6109, pcs, 499, 300, 5, 20&#10;Jeans, 6203, pcs, 999, 650, 5, 10" style="border:1px solid var(--line);border-radius:var(--radius);padding:10px;width:100%;font-size:13px;resize:vertical;"></textarea>
           <button class="btn sm primary" onclick="parseProductImportPaste()" style="margin-top:8px;background:var(--blue);border-color:var(--blue);"><i class="ti ti-clipboard-plus"></i>Paste Preview</button>
         </div>
 
@@ -6320,279 +7314,6 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toast-container"></div>
 
-  <!-- ── SCANNER POPUP MODAL ── -->
-  <div id="sp-modal-bg"
-    onclick="if(event.target===this)closeScannerPopup()"
-    style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.5);align-items:center;justify-content:center;">
-    <div style="background:#fff;border-radius:16px;width:340px;max-width:96vw;max-height:92vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.25);animation:spIn 0.18s ease;">
-      <!-- Header -->
-      <div style="background:linear-gradient(135deg,#1663a6,#0c477c);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-radius:16px 16px 0 0;position:sticky;top:0;z-index:1;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <i class="ti ti-barcode" style="color:#fff;font-size:20px;"></i>
-          <span style="color:#fff;font-weight:800;font-size:15px;">Barcode Scanner</span>
-        </div>
-        <button onclick="closeScannerPopup()" style="background:rgba(255,255,255,0.2);border:none;color:#fff;border-radius:50%;width:30px;height:30px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>
-      </div>
-
-      <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
-
-        <!-- Camera Button -->
-        <button onclick="spToggleCamera()" id="sp-camera-btn"
-          style="width:100%;padding:12px;background:linear-gradient(135deg,#16a663,#0c7c47);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
-          <i class="ti ti-camera"></i> 📱 Mobile Camera se Scan Karo
-        </button>
-
-        <!-- Camera Preview -->
-        <div id="sp-camera-container" style="display:none;position:relative;border-radius:10px;overflow:hidden;background:#000;">
-          <video id="sp-video" style="width:100%;display:block;border-radius:10px;" autoplay muted playsinline></video>
-          <canvas id="sp-canvas" style="display:none;"></canvas>
-          <!-- Green scan box -->
-          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:72%;height:38%;border:3px solid #00ff88;border-radius:8px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,0.38);"></div>
-          <div style="position:absolute;bottom:8px;left:0;right:0;text-align:center;">
-            <span style="background:rgba(0,0,0,0.6);color:#fff;font-size:11px;padding:4px 12px;border-radius:20px;">Barcode ko green box mein rakhein</span>
-          </div>
-          <button onclick="spStopCamera()" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:32px;height:32px;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button>
-        </div>
-        <div id="sp-camera-status" style="display:none;font-size:12px;color:var(--muted);text-align:center;margin-top:-6px;"></div>
-
-        <!-- Divider -->
-        <div style="display:flex;align-items:center;gap:8px;">
-          <div style="flex:1;height:1px;background:var(--line);"></div>
-          <span style="font-size:11px;color:var(--muted);font-weight:600;">YA MANUALLY TYPE KARO</span>
-          <div style="flex:1;height:1px;background:var(--line);"></div>
-        </div>
-
-        <!-- Barcode Input -->
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:6px;">Barcode / Code</label>
-          <input type="text" id="sp-input"
-            placeholder="Scan ya type karein..."
-            style="width:100%;border:2px solid #1663a6;border-radius:8px;padding:10px 12px;font-size:15px;font-weight:600;outline:none;box-sizing:border-box;"
-            onkeydown="if(event.key==='Enter')spSend()">
-          <p style="font-size:11px;color:var(--muted);margin-top:5px;">💡 Physical scanner se scan karo ya Enter dabao</p>
-        </div>
-
-        <!-- Quantity -->
-        <div>
-          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:6px;">Quantity</label>
-          <input type="number" id="sp-qty" value="1" min="1"
-            style="width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:14px;font-weight:600;box-sizing:border-box;">
-        </div>
-
-        <!-- Send Button -->
-        <button onclick="spSend()"
-          style="width:100%;padding:12px;background:linear-gradient(135deg,#1663a6,#0c477c);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
-          <i class="ti ti-send"></i> Sheet mein Send Karo
-        </button>
-
-        <!-- Status -->
-        <div id="sp-status" style="display:none;padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;"></div>
-
-        <!-- Auto-focus -->
-        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);cursor:pointer;">
-          <input type="checkbox" id="sp-autofocus" checked>
-          Auto-clear (har scan ke baad input khali ho)
-        </label>
-
-        <!-- Scan Log -->
-        <div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">Recent Scans</label>
-            <button onclick="spClearLog()" style="font-size:11px;color:var(--muted);background:none;border:none;cursor:pointer;">Clear</button>
-          </div>
-          <div id="sp-log" style="max-height:150px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;">
-            <p style="font-size:12px;color:var(--muted);text-align:center;padding:10px 0;">Abhi koi scan nahi hua</p>
-          </div>
-        </div>
-
-      </div>
-    </div>
-  </div>
-
-  <style>
-    @keyframes spIn {
-      from { opacity:0; transform:scale(0.94) translateY(16px); }
-      to   { opacity:1; transform:scale(1) translateY(0); }
-    }
-  </style>
-
-  <script>
-    // ── Scanner Popup Logic ──────────────────────────────────────
-    var spStream = null;
-    var spScanLogEntries = [];
-    var spLastCode = '';
-    var spLastTime = 0;
-
-    function openScannerPopup() {
-      var bg = document.getElementById('sp-modal-bg');
-      bg.style.display = 'flex';
-      setTimeout(function(){ var i = document.getElementById('sp-input'); if(i) i.focus(); }, 150);
-    }
-
-    function closeScannerPopup() {
-      spStopCamera();
-      document.getElementById('sp-modal-bg').style.display = 'none';
-    }
-
-    document.addEventListener('keydown', function(e){
-      if(e.key === 'Escape'){
-        var bg = document.getElementById('sp-modal-bg');
-        if(bg && bg.style.display !== 'none') closeScannerPopup();
-      }
-    });
-
-    async function spToggleCamera() {
-      var container = document.getElementById('sp-camera-container');
-      if (spStream) { spStopCamera(); return; }
-      var btn = document.getElementById('sp-camera-btn');
-      var statusEl = document.getElementById('sp-camera-status');
-      btn.innerHTML = '<i class="ti ti-loader"></i> Camera shuru ho raha hai...';
-      btn.disabled = true;
-      statusEl.style.display = 'block';
-      statusEl.textContent = '⏳ Camera permission maang raha hai...';
-      try {
-        var constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } };
-        spStream = await navigator.mediaDevices.getUserMedia(constraints);
-        var video = document.getElementById('sp-video');
-        video.srcObject = spStream;
-        await video.play();
-        container.style.display = 'block';
-        statusEl.textContent = '🟢 Camera ready — barcode ko green box mein rakhein';
-        btn.innerHTML = '<i class="ti ti-camera-off"></i> Camera Band Karo';
-        btn.style.background = 'linear-gradient(135deg,#e53e3e,#c53030)';
-        btn.disabled = false;
-        spScanFrame();
-      } catch(err) {
-        statusEl.textContent = '❌ Camera nahi khula: ' + err.message;
-        btn.innerHTML = '<i class="ti ti-camera"></i> 📱 Mobile Camera se Scan Karo';
-        btn.disabled = false;
-      }
-    }
-
-    function spStopCamera() {
-      if (spStream) { spStream.getTracks().forEach(function(t){ t.stop(); }); spStream = null; }
-      var video = document.getElementById('sp-video');
-      if (video) { video.srcObject = null; }
-      var container = document.getElementById('sp-camera-container');
-      if (container) container.style.display = 'none';
-      var statusEl = document.getElementById('sp-camera-status');
-      if (statusEl) statusEl.style.display = 'none';
-      var btn = document.getElementById('sp-camera-btn');
-      if (btn) {
-        btn.innerHTML = '<i class="ti ti-camera"></i> 📱 Mobile Camera se Scan Karo';
-        btn.style.background = 'linear-gradient(135deg,#16a663,#0c7c47)';
-        btn.disabled = false;
-      }
-    }
-
-    function spScanFrame() {
-      if (!spStream) return;
-      var video = document.getElementById('sp-video');
-      var canvas = document.getElementById('sp-canvas');
-      if (!video || !canvas || video.readyState < 2) { requestAnimationFrame(spScanFrame); return; }
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      var ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0);
-      try {
-        var hints = new Map();
-        var ZXing = window.ZXing;
-        if (!ZXing) { requestAnimationFrame(spScanFrame); return; }
-        var reader = new ZXing.BrowserMultiFormatReader();
-        var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        var luminance = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
-        var binaryBitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminance));
-        try {
-          var result = reader.decodeBitmap(binaryBitmap);
-          if (result && result.getText()) {
-            var code = result.getText();
-            var now = Date.now();
-            if (code !== spLastCode || (now - spLastTime) > 2000) {
-              spLastCode = code;
-              spLastTime = now;
-              document.getElementById('sp-input').value = code;
-              spSend();
-            }
-          }
-        } catch(e) { /* no barcode in frame */ }
-      } catch(e) {}
-      if (spStream) requestAnimationFrame(spScanFrame);
-    }
-
-    async function spSend() {
-      var input = document.getElementById('sp-input');
-      var qtyEl = document.getElementById('sp-qty');
-      var statusEl = document.getElementById('sp-status');
-      var barcode = input.value.trim();
-      if (!barcode) {
-        statusEl.style.display = 'block';
-        statusEl.style.background = '#fff3cd';
-        statusEl.style.color = '#856404';
-        statusEl.textContent = '⚠️ Pehle barcode scan ya type karo!';
-        return;
-      }
-      var qty = parseInt(qtyEl.value) || 1;
-      var datetime = new Date().toLocaleString('en-IN');
-
-      // sendBarcode function use karo (original logic se)
-      if (window.sendBarcode) {
-        // original inputs temporarily set karo
-        var origInput = document.getElementById('scanner-input');
-        var origQty = document.getElementById('scanner-qty');
-        if (origInput) origInput.value = barcode;
-        if (origQty) origQty.value = qty;
-        await window.sendBarcode();
-      } else {
-        // Direct Firebase send
-        try {
-          if (window._fbDb && window._fbFns) {
-            var { addDoc, collection } = window._fbFns;
-            await addDoc(collection(window._fbDb, 'scan_sessions'), {
-              value: barcode,
-              quantity: qty,
-              datetime: datetime,
-              sheet: (window.ssSheetOrder && window.ssSheetOrder[0]) || 'Sheet1',
-              col: 0
-            });
-          }
-        } catch(e) { console.warn('Send error:', e); }
-      }
-
-      statusEl.style.display = 'block';
-      statusEl.style.background = '#d4edda';
-      statusEl.style.color = '#155724';
-      statusEl.textContent = '✅ Bheja: ' + barcode + ' (Qty: ' + qty + ')';
-      spAddLog(barcode, qty, datetime);
-
-      if (document.getElementById('sp-autofocus').checked) {
-        input.value = '';
-        qtyEl.value = 1;
-        input.focus();
-      }
-      setTimeout(function(){ statusEl.style.display = 'none'; }, 3000);
-    }
-
-    function spAddLog(barcode, qty, datetime) {
-      spScanLogEntries.unshift({ barcode, qty, datetime });
-      if (spScanLogEntries.length > 20) spScanLogEntries.pop();
-      var logEl = document.getElementById('sp-log');
-      if (!spScanLogEntries.length) {
-        logEl.innerHTML = '<p style="font-size:12px;color:var(--muted);text-align:center;padding:10px 0;">Abhi koi scan nahi hua</p>';
-        return;
-      }
-      logEl.innerHTML = spScanLogEntries.map(function(e){
-        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:#f7f9fb;border-radius:6px;">' +
-          '<div style="font-size:13px;font-weight:700;color:var(--text);">' + e.barcode + '</div>' +
-          '<div style="font-size:11px;color:var(--muted);">Qty: ' + e.qty + '</div>' +
-          '</div>';
-      }).join('');
-    }
-
-    function spClearLog() {
-      spScanLogEntries.length = 0;
-      document.getElementById('sp-log').innerHTML = '<p style="font-size:12px;color:var(--muted);text-align:center;padding:10px 0;">Abhi koi scan nahi hua</p>';
-    }
-  </script>
 
 </body>
 </html>
