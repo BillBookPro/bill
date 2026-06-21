@@ -108,6 +108,7 @@
       _employeePaid: false,
       employees: [],
       adminEmail: '',
+      googleSheetUrl: '',
       _seeded: false,
       business: { name: 'Your Company Name', tagline: 'Business Invoice', address: 'Your Address, City, State - 000000', gstin: '', stateCode: '', phone: '', email: '' }
     };
@@ -149,6 +150,7 @@
             _employeePaid: parsed._employeePaid || false,
             employees: Array.isArray(parsed.employees) ? parsed.employees : [],
             adminEmail: parsed.adminEmail || '',
+            googleSheetUrl: parsed.googleSheetUrl || '',
             _seeded: parsed._seeded || false,
             business: { ...structuredClone(defaultStore.business), ...(parsed.business || {}) }
           };
@@ -834,72 +836,96 @@
       if (ssCurrentTab === 'online') ssRenderOnlineSheet();
     });
 
+    function ssGoogleSheetId(url) {
+      const match = String(url || '').match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+      return match ? match[1] : '';
+    }
+
+    function ssGoogleEmbedUrl(url) {
+      const id = ssGoogleSheetId(url);
+      return id ? `https://docs.google.com/spreadsheets/d/${id}/edit?usp=sharing&rm=minimal&embedded=true` : '';
+    }
+
+    function ssGoogleEditUrl(url) {
+      const id = ssGoogleSheetId(url);
+      return id ? `https://docs.google.com/spreadsheets/d/${id}/edit` : '';
+    }
+
+    function ssGoogleExportUrl(url) {
+      const id = ssGoogleSheetId(url);
+      return id ? `https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx` : '';
+    }
+
+    async function ssSaveGoogleSheetUrl() {
+      const input = document.getElementById('google-sheet-url-input');
+      const url = (input?.value || '').trim();
+      if (!ssGoogleSheetId(url)) {
+        alert('Google Sheet ka sahi link paste karein.');
+        return;
+      }
+      store.googleSheetUrl = url;
+      await saveData();
+      ssRenderOnlineSheet();
+      showToast('success', 'Is account ka Google Sheet save ho gaya.');
+    }
+
+    async function ssChangeGoogleSheetUrl() {
+      if (!confirm('Is account ka Google Sheet link change karna hai?')) return;
+      store.googleSheetUrl = '';
+      await saveData();
+      ssRenderOnlineSheet();
+    }
+
     function ssRenderOnlineSheet() {
       const container = document.getElementById('ss-table-container');
       const cardsEl = document.getElementById('ss-summary-cards');
       if (!container) return;
 
-      const sheetName = ssEscapeHtml(ssOnlineState.activeSheet || 'My Sheet');
-      const filledCells = Object.keys(ssOnlineBook().cells || {}).length;
+      const sheetUrl = store.googleSheetUrl || '';
+      const embedUrl = ssGoogleEmbedUrl(sheetUrl);
+      const editUrl = ssGoogleEditUrl(sheetUrl);
       const ownerLabel = ssEscapeHtml(window._fbCurrentEmail || 'Current Login');
 
+      if (!embedUrl) {
+        cardsEl.innerHTML = `
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#fff7e6;border:1px solid #ffd28a;border-radius:8px;width:100%;flex-wrap:wrap;">
+            <i class="ti ti-brand-google-drive" style="color:#d97706;font-size:18px;"></i>
+            <span style="font-size:13px;color:#92400e;font-weight:700;">${ownerLabel} ke liye abhi Google Sheet set nahi hai.</span>
+          </div>`;
+
+        container.innerHTML = `
+          <div style="max-width:760px;margin:26px auto;background:#fff;border:1px solid var(--line);border-radius:8px;padding:22px;box-shadow:var(--shadow);">
+            <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:16px;">
+              <div style="width:44px;height:44px;border-radius:8px;background:#e8f0fe;color:#1a73e8;display:grid;place-items:center;font-size:24px;"><i class="ti ti-file-spreadsheet"></i></div>
+              <div>
+                <h3 style="margin:0 0 6px;font-size:20px;">Apna Google Sheet jodein</h3>
+                <p style="margin:0;color:var(--muted);line-height:1.5;">Har account ka alag Google Sheet link save hoga. Dusra user login karega to uska apna sheet open hoga.</p>
+              </div>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+              <button class="btn primary" onclick="window.open('https://sheet.new','_blank')"><i class="ti ti-plus"></i>New Google Sheet</button>
+              <button class="btn" onclick="window.open('https://drive.google.com','_blank')"><i class="ti ti-folder"></i>Drive Open</button>
+            </div>
+            <label style="display:block;font-weight:700;margin-bottom:7px;">Google Sheet link paste karein</label>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+              <input id="google-sheet-url-input" type="url" placeholder="https://docs.google.com/spreadsheets/d/..." style="flex:1;min-width:280px;border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:14px;">
+              <button class="btn success" onclick="ssSaveGoogleSheetUrl()"><i class="ti ti-device-floppy"></i>Save Sheet</button>
+            </div>
+          </div>`;
+        return;
+      }
+
       cardsEl.innerHTML = `
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#eaf7f1;border:1px solid #bde8d1;border-radius:8px;width:100%;flex-wrap:wrap;">
-          <i class="ti ti-lock-check" style="color:#11845b;font-size:18px;"></i>
-          <span style="font-size:13px;color:#0f5f43;font-weight:700;">Private Sheet: ${ownerLabel}</span>
-          <span class="online-sheet-count">${filledCells} cells saved</span>
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#e8f0fe;border:1px solid #c5d5f8;border-radius:8px;width:100%;flex-wrap:wrap;">
+          <i class="ti ti-brand-google" style="color:#1a73e8;font-size:18px;"></i>
+          <span style="font-size:13px;color:#174ea6;font-weight:700;">Google Sheet: ${ownerLabel}</span>
+          <a href="${editUrl}" target="_blank" class="btn sm" style="margin-left:auto;background:#1a73e8;color:#fff;border-color:#1a73e8;text-decoration:none;"><i class="ti ti-external-link"></i>Full Screen</a>
+          <button class="btn sm" onclick="ssChangeGoogleSheetUrl()"><i class="ti ti-edit"></i>Change Sheet</button>
         </div>`;
 
-      const headers = Array.from({ length: ssOnlineCols }, (_, col) => `
-        <th data-col="${col}" style="width:${ssOnlineColWidth(col)}px;min-width:${ssOnlineColWidth(col)}px;">
-          ${ssColumnName(col)}
-          <span class="col-resize-handle" onmousedown="ssStartColumnResize(event, ${col})"></span>
-        </th>`).join('');
-
-      const rows = Array.from({ length: ssOnlineRows }, (_, row) => {
-        const cells = Array.from({ length: ssOnlineCols }, (_, col) => {
-          const value = ssEscapeHtml(ssOnlineCellValue(row, col));
-          const active = ssOnlineActive.row === row && ssOnlineActive.col === col ? ' active-cell' : '';
-          return `
-            <td class="${active}" style="width:${ssOnlineColWidth(col)}px;min-width:${ssOnlineColWidth(col)}px;height:${ssOnlineRowHeight(row)}px;">
-              <input
-                value="${value}"
-                data-row="${row}"
-                data-col="${col}"
-                style="width:${ssOnlineColWidth(col)}px;height:${ssOnlineRowHeight(row)}px;"
-                onfocus="ssSetOnlineActive(${row}, ${col}, this.value)"
-                oninput="ssEditOnlineCell(this)"
-                onpaste="ssPasteOnlineCells(event, this)">
-            </td>`;
-        }).join('');
-
-        return `
-          <tr>
-            <th class="row-head" style="height:${ssOnlineRowHeight(row)}px;">
-              ${row + 1}
-              <span class="row-resize-handle" onmousedown="ssStartRowResize(event, ${row})"></span>
-            </th>
-            ${cells}
-          </tr>`;
-      }).join('');
-
       container.innerHTML = `
-        <div class="online-sheet-toolbar">
-          <div class="online-sheet-name"><i class="ti ti-table"></i>${sheetName}</div>
-          <div class="online-formula-bar">
-            <span id="online-active-cell">${ssColumnName(ssOnlineActive.col)}${ssOnlineActive.row + 1}</span>
-            <input id="online-formula-input" value="${ssEscapeHtml(ssOnlineCellValue(ssOnlineActive.row, ssOnlineActive.col))}" oninput="ssUpdateActiveCell(this.value)">
-          </div>
-          <button class="btn sm" onclick="ssAddOnlineRow()"><i class="ti ti-row-insert-bottom"></i>Rows</button>
-          <button class="btn sm" onclick="ssAddOnlineColumn()"><i class="ti ti-column-insert-right"></i>Columns</button>
-          <button class="btn sm" onclick="ssFitOnlineColumn()"><i class="ti ti-arrows-horizontal"></i>Fit</button>
-          <button class="btn sm danger" onclick="ssClearOnlineSheet()"><i class="ti ti-trash"></i>Clear</button>
-        </div>
-        <div class="online-sheet-shell">
-          <table class="online-sheet-grid">
-            <thead><tr><th class="corner-cell"></th>${headers}</tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
+        <div style="width:100%;height:75vh;border-radius:8px;overflow:hidden;border:1px solid var(--line);background:#fff;">
+          <iframe src="${embedUrl}" style="width:100%;height:100%;border:none;" allowfullscreen></iframe>
         </div>`;
     }
 
@@ -1324,19 +1350,15 @@
       let sheetName = 'Report';
 
       if (ssCurrentTab === 'online') {
-        sheetName = ssOnlineState.activeSheet || 'My Sheet';
-        sheetData = [];
-        for (let r = 0; r < ssOnlineRows; r++) {
-          const row = [];
-          let hasValue = false;
-          for (let c = 0; c < ssOnlineCols; c++) {
-            const value = ssOnlineCellValue(r, c);
-            row.push(value);
-            if (value !== '') hasValue = true;
-          }
-          if (hasValue) sheetData.push(row);
+        const exportUrl = ssGoogleExportUrl(store.googleSheetUrl || '');
+        if (!exportUrl) {
+          alert('Pehle apna Google Sheet link save karein.');
+          ssRenderOnlineSheet();
+          return;
         }
-        if (!sheetData.length) sheetData = [['']];
+        window.open(exportUrl, '_blank');
+        showToast('success', 'Aapka Google Sheet download ho raha hai!');
+        return;
       } else if (ssCurrentTab === 'sales') {
         sheetName = 'Sales Report';
         sheetData = [['#','Invoice No','Customer','Date','Items','Subtotal','GST','Total','Status']];
@@ -3606,6 +3628,8 @@
     window.ssAdjustOnlineRow = ssAdjustOnlineRow;
     window.ssStartColumnResize = ssStartColumnResize;
     window.ssStartRowResize = ssStartRowResize;
+    window.ssSaveGoogleSheetUrl = ssSaveGoogleSheetUrl;
+    window.ssChangeGoogleSheetUrl = ssChangeGoogleSheetUrl;
 
     // ─── FIX: CLOSE ALL MODALS ON ESCAPE KEY ──────────────────────────────
     document.addEventListener('keydown', function(e) {
