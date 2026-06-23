@@ -12,7 +12,6 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 
   <script type="module">
     // ─── FIREBASE IMPORTS ────────────────────────────────────────────────────────
@@ -87,7 +86,6 @@
     let editReturnIndex = -1;
     let activeLedgerCustomer = '';
     let activeInvoice = null;
-    let productStockFilter = 'all';
     let currentUser = null;
     let currentEmployeeUsername = '';
     let manualAdminLoginAllowed = false;
@@ -125,14 +123,6 @@
       }
     }
 
-    function normalizeFixedGstRate() {
-      (store.products || []).forEach(product => { product.gst = parseFloat(product.gst) || 18; });
-      [...(store.sales || []), ...(store.purchases || [])].forEach(invoice => {
-        (invoice.items || []).forEach(item => { item.gst = parseFloat(item.gst) || 18; });
-        if (invoice.gst) invoice.gst.taxType = 'intrastate';
-      });
-    }
-
     // ─── HELPER: HASH PASSWORD (SHA-256) ──────────────────────────────────────
     async function hashPassword(password) {
       const encoder = new TextEncoder();
@@ -165,7 +155,6 @@
             business: { ...structuredClone(defaultStore.business), ...(parsed.business || {}) }
           };
           normalizeBusinessProfile();
-          normalizeFixedGstRate();
           // Spreadsheet data Firebase se load karke IIFE ko do
           if (parsed.spreadsheetData && window._ssSetLoadData) {
             window._ssSetLoadData(parsed.spreadsheetData);
@@ -180,7 +169,6 @@
         } else {
           store = structuredClone(defaultStore);
           normalizeBusinessProfile();
-          normalizeFixedGstRate();
           if (window._ssResetLoadData) window._ssResetLoadData();
           store._seeded = false;
           seedDemoData();
@@ -191,7 +179,6 @@
         console.warn('Firebase load error:', e);
         store = structuredClone(defaultStore);
         normalizeBusinessProfile();
-        normalizeFixedGstRate();
         if (window._ssResetLoadData) window._ssResetLoadData();
         store._seeded = false;
         seedDemoData();
@@ -613,14 +600,18 @@
     }
 
     function resolveGstTaxType(type, partyName, savedGst) {
-      return 'intrastate';
+      if (savedGst && (savedGst.taxType === 'interstate' || savedGst.taxType === 'intrastate')) return savedGst.taxType;
+      const party = getPartyRecord(type, partyName);
+      const sellerState = getBusinessStateCode();
+      const partyState = party.stateCode || gstStateCodeFromGSTIN(party.gstin);
+      return partyState && sellerState && partyState !== sellerState ? 'interstate' : 'intrastate';
     }
 
     function buildGstBreakup(items, taxType = 'intrastate') {
       const rows = {};
       items.forEach(item => {
         const c = calcItem(item);
-        const rate = 18;
+        const rate = parseFloat(item.gst) || 0;
         const key = String(rate);
         if (!rows[key]) rows[key] = { rate, taxable: 0, cgst: 0, sgst: 0, igst: 0, totalTax: 0 };
         rows[key].taxable += c.taxable;
@@ -638,6 +629,30 @@
       const gstin = party.gstin || inv.gst?.buyerGstin || '';
       if (type === 'purchase') return 'ITC';
       return gstin ? 'B2B' : 'B2C';
+    }
+
+    function collectHsnSummary(source = 'sales') {
+      const rows = {};
+      const invoices = source === 'purchase' ? (store.purchases || []) : (store.sales || []);
+      invoices.forEach(inv => {
+        const taxType = resolveGstTaxType(source === 'purchase' ? 'purchase' : 'sale', inv.party, inv.gst);
+        (inv.items || []).forEach(item => {
+          const c = calcItem(item);
+          const hsn = String(item.hsn || '').trim() || 'NA';
+          const unit = item.unit || 'pcs';
+          const key = `${hsn}|${unit}|${item.gst || 0}|${taxType}`;
+          if (!rows[key]) rows[key] = { hsn, unit, gst: parseFloat(item.gst) || 0, taxType, qty: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, totalTax: 0 };
+          rows[key].qty += parseFloat(item.qty) || 0;
+          rows[key].taxable += c.taxable;
+          rows[key].totalTax += c.tax;
+          if (taxType === 'interstate') rows[key].igst += c.tax;
+          else {
+            rows[key].cgst += c.tax / 2;
+            rows[key].sgst += c.tax / 2;
+          }
+        });
+      });
+      return Object.values(rows).sort((a, b) => String(a.hsn).localeCompare(String(b.hsn)));
     }
 
     function calcTotals(items, taxType = 'intrastate') {
@@ -801,7 +816,7 @@
 
     function ssShowTab(tab) {
       ssCurrentTab = tab;
-      ['sales','purchase','returns','stock','summary','online'].forEach(t => {
+      ['sales','purchase','returns','summary','online'].forEach(t => {
         const btn = document.getElementById('ss-tab-' + t);
         if (!btn) return;
         if (t === tab) {
@@ -1084,88 +1099,6 @@
       return true;
     }
 
-    function ssDateKey(dateStr) {
-      if (!dateStr) return '';
-      if (dateStr instanceof Date) return dateStr.toISOString().slice(0, 10);
-      const value = String(dateStr);
-      if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
-      const parsed = new Date(value);
-      return Number.isNaN(parsed.getTime()) ? value.slice(0, 10) : parsed.toISOString().slice(0, 10);
-    }
-
-    function ssMonthDates(from, to) {
-      const dates = new Set();
-      [...(store.sales || []), ...(store.purchases || []), ...(store.ecomReturns || [])].forEach(row => {
-        const key = ssDateKey(row.date);
-        if (key && ssInRange(key, from, to)) dates.add(key);
-      });
-      return [...dates].sort();
-    }
-
-    function ssBuildSalesStockRows(from, to) {
-      const dates = ssMonthDates(from, to);
-      const map = new Map();
-      const ensure = (name) => {
-        const key = String(name || '').trim();
-        if (!key) return null;
-        const id = key.toLowerCase();
-        if (!map.has(id)) {
-          const product = (store.products || []).find(p => String(p.name || '').trim().toLowerCase() === id) || {};
-          map.set(id, {
-            sku: key,
-            category: product.category || product.cat || '',
-            totalCount: Number(product.stock || 0),
-            returns: 0,
-            consignment: 0,
-            newStock: 0,
-            onlineSales: 0,
-            offlineSales: 0,
-            currentStock: Number(product.stock || 0),
-            daily: Object.fromEntries(dates.map(d => [d, 0]))
-          });
-        }
-        return map.get(id);
-      };
-
-      (store.products || []).forEach(p => ensure(p.name));
-
-      (store.purchases || []).filter(r => ssInRange(ssDateKey(r.date), from, to)).forEach(inv => {
-        (inv.items || []).forEach(item => {
-          const row = ensure(item.name);
-          if (!row) return;
-          row.newStock += Number(item.qty || 0);
-        });
-      });
-
-      (store.sales || []).filter(r => ssInRange(ssDateKey(r.date), from, to)).forEach(inv => {
-        const key = ssDateKey(inv.date);
-        const party = String(inv.party || '').toLowerCase();
-        const isOffline = inv.saleType ? inv.saleType === 'offline' :
-          (party.includes('offline') || party.includes('retail') || party.includes('cash') || party.includes('counter'));
-        (inv.items || []).forEach(item => {
-          const qty = Number(item.qty || 0);
-          const row = ensure(item.name);
-          if (!row) return;
-          row.onlineSales += isOffline ? 0 : qty;
-          row.offlineSales += isOffline ? qty : 0;
-          if (key) row.daily[key] = (row.daily[key] || 0) + qty;
-        });
-      });
-
-      (store.ecomReturns || []).filter(r => ssInRange(ssDateKey(r.date), from, to)).forEach(ret => {
-        const row = ensure(ret.productName || ret.pname);
-        if (!row) return;
-        row.returns += Number(ret.qty || 1);
-      });
-
-      const rows = [...map.values()].map(row => ({
-        ...row,
-        currentStock: row.totalCount + row.returns + row.newStock - row.consignment - row.onlineSales - row.offlineSales
-      })).sort((a, b) => a.sku.localeCompare(b.sku));
-
-      return { dates, rows };
-    }
-
     function ssClearDates() {
       document.getElementById('ss-date-from').value = '';
       document.getElementById('ss-date-to').value = '';
@@ -1180,78 +1113,6 @@
 
       if (ssCurrentTab === 'online') {
         ssRenderOnlineSheet();
-        return;
-      }
-
-      if (ssCurrentTab === 'stock') {
-        const report = ssBuildSalesStockRows(from, to);
-        const totals = report.rows.reduce((acc, row) => {
-          acc.totalCount += row.totalCount;
-          acc.returns += row.returns;
-          acc.newStock += row.newStock;
-          acc.onlineSales += row.onlineSales;
-          acc.offlineSales += row.offlineSales;
-          acc.currentStock += row.currentStock;
-          return acc;
-        }, { totalCount: 0, returns: 0, newStock: 0, onlineSales: 0, offlineSales: 0, currentStock: 0 });
-
-        cardsEl.innerHTML = `
-          <div style="background:#e8f4fd;border:1px solid #90caf9;border-radius:10px;padding:14px 18px;min-width:145px;text-align:center;">
-            <div style="font-size:12px;color:#1565c0;font-weight:700;">TOTAL SKU</div>
-            <div style="font-size:22px;font-weight:900;color:#1a73e8;">${report.rows.length}</div>
-          </div>
-          <div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:10px;padding:14px 18px;min-width:145px;text-align:center;">
-            <div style="font-size:12px;color:#2e7d32;font-weight:700;">CURRENT STOCK</div>
-            <div style="font-size:22px;font-weight:900;color:#2e7d32;">${totals.currentStock}</div>
-          </div>
-          <div style="background:#fff3e0;border:1px solid #ffcc80;border-radius:10px;padding:14px 18px;min-width:145px;text-align:center;">
-            <div style="font-size:12px;color:#e65100;font-weight:700;">ONLINE SALES</div>
-            <div style="font-size:22px;font-weight:900;color:#e65100;">${totals.onlineSales}</div>
-          </div>
-          <div style="background:#f3e5f5;border:1px solid #ce93d8;border-radius:10px;padding:14px 18px;min-width:145px;text-align:center;">
-            <div style="font-size:12px;color:#6a1b9a;font-weight:700;">RETURNS</div>
-            <div style="font-size:22px;font-weight:900;color:#6a1b9a;">${totals.returns}</div>
-          </div>`;
-
-        const dateHeaders = report.dates.map(d => `<th style="padding:10px 12px;text-align:right;white-space:nowrap;">${niceDate(d)}</th>`).join('');
-        container.innerHTML = `
-          <div style="overflow:auto;max-height:70vh;">
-            <table style="width:max-content;min-width:100%;border-collapse:collapse;font-size:13px;">
-              <thead>
-                <tr style="background:#17324d;color:#fff;position:sticky;top:0;z-index:2;">
-                  <th style="padding:10px 12px;text-align:left;position:sticky;left:0;background:#17324d;z-index:3;">SKU</th>
-                  <th style="padding:10px 12px;text-align:left;">Category</th>
-                  <th style="padding:10px 12px;text-align:right;">Total Count</th>
-                  <th style="padding:10px 12px;text-align:right;">Return</th>
-                  <th style="padding:10px 12px;text-align:right;">Consignment</th>
-                  <th style="padding:10px 12px;text-align:right;">New Stock</th>
-                  <th style="padding:10px 12px;text-align:right;">Online Sales</th>
-                  <th style="padding:10px 12px;text-align:right;">Offline Sales</th>
-                  <th style="padding:10px 12px;text-align:right;">Current Stock</th>
-                  ${dateHeaders}
-                </tr>
-              </thead>
-              <tbody>${report.rows.length === 0 ? '<tr><td colspan="10" style="padding:30px;text-align:center;color:#888;">Koi SKU data nahi mila</td></tr>' :
-                report.rows.map((row, i) => {
-                  const bg = i % 2 === 0 ? '#fff' : '#f8fbff';
-                  const stockColor = row.currentStock < 0 ? '#c62828' : row.currentStock <= 5 ? '#e65100' : '#2e7d32';
-                  const dailyCells = report.dates.map(d => `<td style="padding:8px 12px;text-align:right;">${row.daily[d] || ''}</td>`).join('');
-                  return `<tr style="background:${bg};border-bottom:1px solid #e8edf3;">
-                    <td style="padding:8px 12px;font-weight:800;color:#17324d;position:sticky;left:0;background:${bg};">${row.sku}</td>
-                    <td style="padding:8px 12px;color:#555;">${row.category || '-'}</td>
-                    <td style="padding:8px 12px;text-align:right;">${row.totalCount}</td>
-                    <td style="padding:8px 12px;text-align:right;color:#6a1b9a;">${row.returns || ''}</td>
-                    <td style="padding:8px 12px;text-align:right;">${row.consignment || ''}</td>
-                    <td style="padding:8px 12px;text-align:right;color:#2e7d32;">${row.newStock || ''}</td>
-                    <td style="padding:8px 12px;text-align:right;color:#e65100;">${row.onlineSales || ''}</td>
-                    <td style="padding:8px 12px;text-align:right;">${row.offlineSales || ''}</td>
-                    <td style="padding:8px 12px;text-align:right;font-weight:900;color:${stockColor};">${row.currentStock}</td>
-                    ${dailyCells}
-                  </tr>`;
-                }).join('')
-              }</tbody>
-            </table>
-          </div>`;
         return;
       }
 
@@ -1389,12 +1250,13 @@
               <th style="padding:10px 12px;text-align:left;">Platform</th>
               <th style="padding:10px 12px;text-align:left;">Order ID / AWB</th>
               <th style="padding:10px 12px;text-align:left;">Product</th>
+              <th style="padding:10px 12px;text-align:left;">Qty</th>
               <th style="padding:10px 12px;text-align:left;">Date</th>
               <th style="padding:10px 12px;text-align:left;">Return Type</th>
               <th style="padding:10px 12px;text-align:left;">Status</th>
               <th style="padding:10px 12px;text-align:right;">Claim (₹)</th>
             </tr></thead>
-            <tbody>${data.length === 0 ? '<tr><td colspan="8" style="text-align:center;padding:30px;color:#888;">Koi return nahi mila</td></tr>' :
+            <tbody>${data.length === 0 ? '<tr><td colspan="9" style="text-align:center;padding:30px;color:#888;">Koi return nahi mila</td></tr>' :
               data.map((r, i) => {
                 const rowBg = i % 2 === 0 ? '#fff' : '#fdf5ff';
                 const pc = platColors[r.platform] || '#555';
@@ -1404,6 +1266,7 @@
                   <td style="padding:9px 12px;"><span style="background:${pc}22;color:${pc};padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;">${(r.platform||'').toUpperCase()}</span></td>
                   <td style="padding:9px 12px;font-family:monospace;font-size:12px;">${r.orderId||'-'}</td>
                   <td style="padding:9px 12px;font-weight:600;">${r.productName||r.pname||'-'}</td>
+                  <td style="padding:9px 12px;font-weight:700;">${r.qty||1}</td>
                   <td style="padding:9px 12px;color:#555;">${niceDate(r.date)}</td>
                   <td style="padding:9px 12px;font-size:12px;">${r.type||r.returnType||'-'}</td>
                   <td style="padding:9px 12px;"><span style="background:${stColor}22;color:${stColor};padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;">${(r.status||'').toUpperCase()}</span></td>
@@ -1498,41 +1361,12 @@
         window.open(exportUrl, '_blank');
         showToast('success', 'Aapka Google Sheet download ho raha hai!');
         return;
-      } else if (ssCurrentTab === 'stock') {
-        const report = ssBuildSalesStockRows(from, to);
-        sheetName = 'Sales & Stock';
-        sheetData = [[
-          'SKU',
-          'Category',
-          'Total Count',
-          'Return',
-          'Consignment',
-          'New Stock',
-          'Online Sales',
-          'Offline Sales',
-          'Current Stock',
-          ...report.dates
-        ]];
-        report.rows.forEach(row => {
-          sheetData.push([
-            row.sku,
-            row.category || '',
-            row.totalCount,
-            row.returns,
-            row.consignment,
-            row.newStock,
-            row.onlineSales,
-            row.offlineSales,
-            row.currentStock,
-            ...report.dates.map(d => row.daily[d] || '')
-          ]);
-        });
       } else if (ssCurrentTab === 'sales') {
         sheetName = 'Sales Report';
-        sheetData = [['#','Invoice No','Customer','Sale Type','Date','Items','Subtotal','GST','Total','Status']];
+        sheetData = [['#','Invoice No','Customer','Date','Items','Subtotal','GST','Total','Status']];
         (store.sales||[]).filter(r => ssInRange(r.date, from, to)).forEach((r, i) => {
           const t = calcTotals(r.items);
-          sheetData.push([i+1, r.invoiceNo, r.party, r.saleType || 'online', r.date, r.items.length, Math.round(t.sub), Math.round(t.gst), Math.round(t.total), r.status]);
+          sheetData.push([i+1, r.invoiceNo, r.party, r.date, r.items.length, Math.round(t.sub), Math.round(t.gst), Math.round(t.total), r.status]);
         });
       } else if (ssCurrentTab === 'purchase') {
         sheetName = 'Purchase Report';
@@ -1543,9 +1377,9 @@
         });
       } else if (ssCurrentTab === 'returns') {
         sheetName = 'Returns Report';
-        sheetData = [['#','Platform','Order ID','Product','Date','Return Type','Status','Claim Amount']];
+        sheetData = [['#','Platform','Order ID','Product','Quantity','Date','Return Type','Status','Claim Amount']];
         (store.ecomReturns||[]).filter(r => ssInRange(r.date, from, to)).forEach((r, i) => {
-          sheetData.push([i+1, r.platform, r.orderId, r.productName||r.pname, r.date, r.type||r.returnType, r.status, parseFloat(r.amount)||0]);
+          sheetData.push([i+1, r.platform, r.orderId, r.productName||r.pname, r.qty || 1, r.date, r.type||r.returnType, r.status, parseFloat(r.amount)||0]);
         });
       } else {
         sheetName = 'Summary';
@@ -1609,7 +1443,7 @@
       const data = store[type === 'sales' ? 'sales' : 'purchases'];
       const tbody = document.getElementById(type === 'sales' ? 'sales-tbody' : 'purchase-tbody');
       if (!data.length) { tbody.innerHTML =
-          `<tr><td colspan="${type === 'sales' ? 9 : 9}" class="empty">Koi entry nahi. Naya ${type === 'sales' ? 'Invoice' : 'Bill'} banayein.</td></tr>`; return; }
+          `<tr><td colspan="${type === 'sales' ? 9 : 8}" class="empty">Koi entry nahi. Naya ${type === 'sales' ? 'Invoice' : 'Bill'} banayein.</td></tr>`; return; }
       const sortedRows = data.map((r, index) => ({ r, index })).sort((a, b) => {
         const dateA = new Date((a.r.date || '') + 'T00:00:00').getTime() || 0;
         const dateB = new Date((b.r.date || '') + 'T00:00:00').getTime() || 0;
@@ -1619,9 +1453,7 @@
       tbody.innerHTML = sortedRows.map(({ r, index }, i) => {
         const t = calcTotals(r.items);
         return `<tr>
-            ${type === 'sales'
-              ? `<td><input type="checkbox" class="sale-checkbox" data-idx="${index}" onchange="updateSaleSelectionUI()"></td>`
-              : `<td><input type="checkbox" class="purchase-checkbox" data-idx="${index}" onchange="updatePurchaseSelectionUI()"></td>`}
+            ${type === 'sales' ? `<td><input type="checkbox" class="sale-checkbox" data-idx="${index}" onchange="updateSaleSelectionUI()"></td>` : ''}
             <td>${i+1}</td><td class="cell-strong">${r.invoiceNo}</td><td>${r.party}</td>
             <td>${niceDate(r.date)}</td><td>${r.items.length} item${r.items.length>1?'s':''}</td>
             <td class="cell-strong">${fmt(t.total)}</td><td>${badge(r.status)}</td>
@@ -1633,7 +1465,6 @@
           </tr>`;
       }).join('');
       if (type === 'sales') updateSaleSelectionUI();
-      if (type === 'purchase') updatePurchaseSelectionUI();
     }
 
     async function editEntry(index, type) {
@@ -1676,41 +1507,6 @@
       await saveData();
       renderTable('sales');
       showToast('success', `${indices.length} sale invoices delete ho gaye!`);
-    }
-
-    function toggleAllPurchases(cb) {
-      document.querySelectorAll('.purchase-checkbox').forEach(c => c.checked = cb.checked);
-      updatePurchaseSelectionUI();
-    }
-
-    function updatePurchaseSelectionUI() {
-      const checked = document.querySelectorAll('.purchase-checkbox:checked');
-      const btn = document.getElementById('delete-selected-purchases-btn');
-      const countEl = document.getElementById('selected-purchase-count');
-      if (btn && countEl) {
-        btn.style.display = checked.length ? 'inline-flex' : 'none';
-        countEl.textContent = checked.length;
-      }
-      const all = document.querySelectorAll('.purchase-checkbox');
-      const selectAllCb = document.getElementById('select-all-purchases');
-      if (selectAllCb) selectAllCb.indeterminate = checked.length > 0 && checked.length < all.length;
-      if (selectAllCb) selectAllCb.checked = all.length > 0 && checked.length === all.length;
-    }
-
-    async function deleteSelectedPurchases() {
-      const checked = document.querySelectorAll('.purchase-checkbox:checked');
-      if (!checked.length) return;
-      if (!confirm(`Kya aap ${checked.length} selected purchase bills delete karna chahte hain?`)) return;
-      if (!await verifyActionPassword('Delete Selected Purchase Bills')) return;
-      const indices = Array.from(checked).map(c => parseInt(c.dataset.idx)).sort((a, b) => b - a);
-      indices.forEach(idx => {
-        const entry = store.purchases[idx];
-        if (entry) adjustStockForInvoices(entry.items, 'sub');
-        store.purchases.splice(idx, 1);
-      });
-      await saveData();
-      renderTable('purchase');
-      showToast('success', `${indices.length} purchase bills delete ho gaye!`);
     }
 
     // ─── RETURNS ──────────────────────────────────────────────────────────────
@@ -1757,7 +1553,7 @@
         if (returnFilterType !== 'all' || returnFilterPlatform !== 'all') {
           msg = 'Is filter ke saath koi return nahi mila. Filter change karke dekhein.';
         }
-        tbody.innerHTML = `<tr><td colspan="9" class="empty">${msg}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="11" class="empty">${msg}</td></tr>`;
         return;
       }
 
@@ -1788,6 +1584,7 @@
             <td><span class="badge ${platClass}">${(r.platform||'').toUpperCase()}</span></td>
             <td class="cell-strong">${esc(r.orderId)}</td>
             <td>${esc(r.productName)}</td>
+            <td class="cell-strong">${esc(r.qty || 1)}</td>
             <td>${niceDate(r.date)}</td>
             <td><small>${esc(r.type)}</small></td>
             <td><span class="badge ${statusBadgeClass}">${esc((r.status||'').replace('_',' '))}</span></td>
@@ -1803,9 +1600,22 @@
 
     function adjustStockForReturn(ret, action) {
       if (!ret || ret.type !== 'RTO (Courier Return)') return;
-      const prod = findProduct(ret.productName);
+      let prod = findProduct(ret.productName);
+      if (!prod && action === 'add') {
+        prod = {
+          name: String(ret.productName || '').trim(),
+          unit: 'pcs',
+          salePrice: 0,
+          purchasePrice: 0,
+          gst: 18,
+          stock: 0,
+          packingStock: 0
+        };
+        store.products.push(prod);
+      }
       if (!prod) return;
-      const delta = action === 'add' ? 1 : -1;
+      const qty = Math.max(1, parseFloat(ret.qty ?? ret.quantity ?? 1) || 1);
+      const delta = action === 'add' ? qty : -qty;
       prod.stock = Math.max(0, (prod.stock || 0) + delta);
       prod.packingStock = Math.max(0, (prod.packingStock || 0) + delta);
     }
@@ -1906,7 +1716,7 @@
         const party = getPartyRecord('sale', inv.party);
         const taxType = resolveGstTaxType('sale', inv.party, inv.gst);
         const totals = calcTotals(inv.items || [], taxType);
-        const items = (inv.items || []).map(it => `${it.name} x ${it.qty} ${it.unit || ''} @ ${it.price}`).join('; ');
+        const items = (inv.items || []).map(it => `${it.name}${it.hsn ? ` (HSN ${it.hsn})` : ''} x ${it.qty} ${it.unit || ''} @ ${it.price}`).join('; ');
         return [inv.invoiceNo, inv.party, party.gstin || inv.gst?.buyerGstin || '', taxType === 'interstate' ? 'IGST' : 'CGST+SGST', inv.date, inv.due || '', inv.status, items, Math.round(totals.taxable), Math.round(totals.cgst), Math.round(totals.sgst), Math.round(totals.igst), Math.round(totals.gst), Math.round(totals.total), inv.notes || ''];
       });
       downloadCSV('sale_invoice_report.csv', headers, rows);
@@ -1919,7 +1729,7 @@
         const party = getPartyRecord('purchase', inv.party);
         const taxType = resolveGstTaxType('purchase', inv.party, inv.gst);
         const totals = calcTotals(inv.items || [], taxType);
-        const items = (inv.items || []).map(it => `${it.name} x ${it.qty} ${it.unit || ''} @ ${it.price}`).join('; ');
+        const items = (inv.items || []).map(it => `${it.name}${it.hsn ? ` (HSN ${it.hsn})` : ''} x ${it.qty} ${it.unit || ''} @ ${it.price}`).join('; ');
         return [inv.invoiceNo, inv.party, party.gstin || inv.gst?.buyerGstin || '', taxType === 'interstate' ? 'IGST' : 'CGST+SGST', inv.date, inv.due || '', inv.status, items, Math.round(totals.taxable), Math.round(totals.cgst), Math.round(totals.sgst), Math.round(totals.igst), Math.round(totals.gst), Math.round(totals.total), inv.notes || ''];
       });
       downloadCSV('purchase_bill_report.csv', headers, rows);
@@ -1960,6 +1770,7 @@
     function exportGstr1Report() {
       const b2bRows = [];
       const b2cRows = [];
+      const hsnRows = collectHsnSummary('sales').map(r => [r.hsn, r.unit, r.qty, Math.round(r.taxable), r.gst, Math.round(r.cgst), Math.round(r.sgst), Math.round(r.igst), Math.round(r.totalTax)]);
 
       (store.sales || []).forEach(inv => {
         const party = getPartyRecord('sale', inv.party);
@@ -1975,6 +1786,7 @@
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Invoice No','Date','Customer','GSTIN','Invoice Type','GST Type','Taxable Value','CGST','SGST','IGST','Total GST','Invoice Total','Status'], ...b2bRows]), 'B2B');
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Invoice No','Date','Customer','GSTIN','Invoice Type','GST Type','Taxable Value','CGST','SGST','IGST','Total GST','Invoice Total','Status'], ...b2cRows]), 'B2C');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['HSN/SAC','Unit','Qty','Taxable Value','GST Rate','CGST','SGST','IGST','Total GST'], ...hsnRows]), 'HSN Summary');
         XLSX.writeFile(wb, 'gstr1_sales_report.xlsx');
       } else {
         downloadCSV('gstr1_sales_report.csv', ['Invoice No','Date','Customer','GSTIN','Invoice Type','GST Type','Taxable Value','CGST','SGST','IGST','Total GST','Invoice Total','Status'], [...b2bRows, ...b2cRows]);
@@ -2043,8 +1855,8 @@
 
     function exportReturnsReport(kind = 'all') {
       const labels = { all: 'all_returns_report', rto: 'rto_return_report', customer: 'customer_return_report', visible: 'visible_returns_report' };
-      const headers = ['Platform', 'Order ID / AWB', 'Product Name', 'Return Date', 'Return Type', 'Status', 'Claim / Refund Amount'];
-      const rows = getReturnsForReport(kind).map(r => [r.platform || '', r.orderId || '', r.productName || '', r.date || '', r.type || '', r.status || '', r.amount || 0]);
+      const headers = ['Platform', 'Order ID / AWB', 'Product Name', 'Quantity', 'Return Date', 'Return Type', 'Status', 'Claim / Refund Amount'];
+      const rows = getReturnsForReport(kind).map(r => [r.platform || '', r.orderId || '', r.productName || '', r.qty || 1, r.date || '', r.type || '', r.status || '', r.amount || 0]);
       downloadCSV(`${labels[kind] || labels.all}.csv`, headers, rows);
       showToast('success', 'Return report download ho gaya.');
     }
@@ -2054,6 +1866,7 @@
         tr.querySelector('.bulk-platform')?.value || '',
         tr.querySelector('.bulk-orderid')?.value.trim() || '',
         tr.querySelector('.bulk-pname')?.value.trim() || '',
+        tr.querySelector('.bulk-qty')?.value || 1,
         tr.querySelector('.bulk-date')?.value || '',
         tr.querySelector('.bulk-type')?.value || '',
         tr.querySelector('.bulk-status')?.value || '',
@@ -2079,10 +1892,6 @@
         }
 
         let lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-        const firstLine = (lines[0] || '').toLowerCase();
-        if (firstLine.includes('product') && (firstLine.includes('platform') || firstLine.includes('order'))) {
-          lines = lines.slice(1);
-        }
         if (!lines.length) {
           alert('Import file mein koi valid return row nahi mili.');
           input.value = '';
@@ -2112,8 +1921,8 @@
         const total = invoices.reduce((sum, inv) => sum + calcTotals(inv.items || []).total, 0);
         return [c.name, c.phone || '', c.gstin || '', c.address || '', invoices.length, Math.round(total)];
       });
-      const returnRows = (kind = 'all') => getReturnsForReport(kind).map(r => [r.platform || '', r.orderId || '', r.productName || '', r.date || '', r.type || '', r.status || '', r.amount || 0]);
-      const productRows = store.products.map(p => [p.name, p.unit || '', p.salePrice || 0, p.purchasePrice || 0, p.gst || 0, p.stock || 0, p.packingStock || 0]);
+      const returnRows = (kind = 'all') => getReturnsForReport(kind).map(r => [r.platform || '', r.orderId || '', r.productName || '', r.qty || 1, r.date || '', r.type || '', r.status || '', r.amount || 0]);
+      const productRows = store.products.map(p => [p.name, p.hsn || '', p.unit || '', p.salePrice || 0, p.purchasePrice || 0, p.gst || 0, p.stock || 0, p.packingStock || 0]);
       const totalSales = store.sales.reduce((sum, inv) => sum + calcTotals(inv.items || []).total, 0);
       const totalPurchases = store.purchases.reduce((sum, inv) => sum + calcTotals(inv.items || []).total, 0);
 
@@ -2132,10 +1941,10 @@
         ]);
         addSheet('Sales', [['Invoice No', 'Customer', 'Date', 'Status', 'Subtotal', 'GST', 'Total'], ...salesRows]);
         addSheet('Customers', [['Name', 'Phone', 'GSTIN', 'Address', 'Total Bills', 'Total Amount'], ...customerRows]);
-        addSheet('Returns All', [['Platform', 'Order ID', 'Product', 'Date', 'Type', 'Status', 'Amount'], ...returnRows('all')]);
-        addSheet('RTO Returns', [['Platform', 'Order ID', 'Product', 'Date', 'Type', 'Status', 'Amount'], ...returnRows('rto')]);
-        addSheet('Customer Returns', [['Platform', 'Order ID', 'Product', 'Date', 'Type', 'Status', 'Amount'], ...returnRows('customer')]);
-        addSheet('Products', [['Product', 'Unit', 'Sale Price', 'Purchase Price', 'GST%', 'Stock', 'Packing Stock'], ...productRows]);
+        addSheet('Returns All', [['Platform', 'Order ID', 'Product', 'Quantity', 'Date', 'Type', 'Status', 'Amount'], ...returnRows('all')]);
+        addSheet('RTO Returns', [['Platform', 'Order ID', 'Product', 'Quantity', 'Date', 'Type', 'Status', 'Amount'], ...returnRows('rto')]);
+        addSheet('Customer Returns', [['Platform', 'Order ID', 'Product', 'Quantity', 'Date', 'Type', 'Status', 'Amount'], ...returnRows('customer')]);
+        addSheet('Products', [['Product', 'HSN/SAC', 'Unit', 'Sale Price', 'Purchase Price', 'GST%', 'Stock', 'Packing Stock'], ...productRows]);
         addSheet('Purchases', [['Bill No', 'Vendor', 'Date', 'Status', 'Subtotal', 'GST', 'Total'], ...purchaseRows]);
         XLSX.writeFile(wb, 'billpro_main_report.xlsx');
       } else {
@@ -2152,9 +1961,9 @@
 
     // ─── PRODUCTS EXCEL IMPORT/EXPORT ────────────────────────────────────────
     function exportProductsToExcel() {
-      const headers = ['Product Name','Unit','Sale Price','Purchase Price','GST%','Stock'];
+      const headers = ['Product Name','HSN/SAC','Unit','Sale Price','Purchase Price','GST%','Stock'];
       const rows = store.products.map(p => [
-        p.name, p.unit||'pcs', p.salePrice||0, p.purchasePrice||0, p.gst||0, p.stock||0
+        p.name, p.hsn || '', p.unit||'pcs', p.salePrice||0, p.purchasePrice||0, p.gst||0, p.stock||0
       ]);
 
       // Build CSV (Excel compatible)
@@ -2237,14 +2046,15 @@
       if (!rows.length) { alert('Data mein koi product nahi mila.'); return; }
 
       const firstRow = rows[0].map(h => h.toLowerCase().replace(/[^a-z]/g, ''));
-      const hasHeader = firstRow.some(h => h.includes('name') || h.includes('product') || h.includes('sale') || h.includes('purchase') || h.includes('stock'));
-      const header = hasHeader ? firstRow : ['productname', 'unit', 'saleprice', 'purchaseprice', 'stock'];
+      const hasHeader = firstRow.some(h => h.includes('name') || h.includes('product') || h.includes('hsn') || h.includes('sac') || h.includes('sale') || h.includes('purchase') || h.includes('stock'));
+      const header = hasHeader ? firstRow : ((rows[0] || []).length >= 7 ? ['productname', 'hsn', 'unit', 'saleprice', 'purchaseprice', 'gst', 'stock'] : ['productname', 'unit', 'saleprice', 'purchaseprice', 'gst', 'stock']);
       const dataRows = hasHeader ? rows.slice(1) : rows;
       const nameCol = header.findIndex(h => h.includes('name') || h.includes('product'));
+      const hsnCol = header.findIndex(h => h.includes('hsn') || h.includes('sac'));
       const unitCol = header.findIndex(h => h.includes('unit'));
       const saleCol = header.findIndex(h => h.includes('sale') || h.includes('sprice'));
       const purCol = header.findIndex(h => h.includes('purchase') || h.includes('pprice'));
-      const gstCol = -1;
+      const gstCol = header.findIndex(h => h.includes('gst'));
       const stockCol = header.findIndex(h => h.includes('stock'));
 
       const parsed = [];
@@ -2257,11 +2067,12 @@
         if (!name) { errors.push(`Row ${i + 1}: Product Name missing, skip`); return; }
         parsed.push({
           name,
-          unit: clean(unitCol >= 0 ? cols[unitCol] : cols[1]) || 'pcs',
-          salePrice: num(saleCol >= 0 ? cols[saleCol] : cols[2]),
-          purchasePrice: num(purCol >= 0 ? cols[purCol] : cols[3]),
-          gst: 18,
-          stock: num(stockCol >= 0 ? cols[stockCol] : cols[4]),
+          hsn: clean(hsnCol >= 0 ? cols[hsnCol] : ''),
+          unit: clean(unitCol >= 0 ? cols[unitCol] : cols[2]) || 'pcs',
+          salePrice: num(saleCol >= 0 ? cols[saleCol] : cols[3]),
+          purchasePrice: num(purCol >= 0 ? cols[purCol] : cols[4]),
+          gst: num(gstCol >= 0 ? cols[gstCol] : cols[5]),
+          stock: num(stockCol >= 0 ? cols[stockCol] : cols[6]),
           packingStock: 0
         });
       });
@@ -2275,11 +2086,11 @@
       if (parsed.length > 0) {
         previewHTML += `<div class="table-wrap" style="max-height:280px;overflow-y:auto;">
           <table>
-            <thead><tr><th>#</th><th>Name</th><th>Unit</th><th>Sale Price</th><th>Purchase Price</th><th>GST%</th><th>Stock</th><th>Status</th></tr></thead>
+            <thead><tr><th>#</th><th>Name</th><th>HSN/SAC</th><th>Unit</th><th>Sale Price</th><th>Purchase Price</th><th>GST%</th><th>Stock</th><th>Status</th></tr></thead>
             <tbody>${parsed.map((p, i) => {
               const exists = store.products.some(sp => sp.name.toLowerCase() === p.name.toLowerCase());
               return `<tr>
-                <td>${i+1}</td><td><strong>${esc(p.name)}</strong></td><td>${p.unit}</td>
+                <td>${i+1}</td><td><strong>${esc(p.name)}</strong></td><td>${esc(p.hsn || '')}</td><td>${p.unit}</td>
                 <td>${fmt(p.salePrice)}</td><td>${fmt(p.purchasePrice)}</td><td>${p.gst}%</td><td>${p.stock}</td>
                 <td>${exists ? '<span class="badge pending">⚠ Update</span>' : '<span class="badge paid">✅ New</span>'}</td>
               </tr>`;
@@ -2484,19 +2295,21 @@
 
     function addBulkRow(data = {}) {
       const today = new Date().toISOString().split('T')[0];
+      const selectedPlatform = normalizeBulkPlatform(data.platform) || data.platform || 'meesho';
       const tr = document.createElement('tr');
       tr.innerHTML = `
           <td>
             <select class="bulk-platform">
-              <option value="meesho" ${data.platform==='meesho'?'selected':''}>Meesho</option>
-              <option value="amazon" ${data.platform==='amazon'?'selected':''}>Amazon</option>
-              <option value="flipkart" ${data.platform==='flipkart'?'selected':''}>Flipkart</option>
-              <option value="myntra" ${data.platform==='myntra'?'selected':''}>Myntra</option>
-              <option value="flex" ${data.platform==='flex'?'selected':''}>Flex</option>
+              <option value="meesho" ${selectedPlatform==='meesho'?'selected':''}>Meesho</option>
+              <option value="amazon" ${selectedPlatform==='amazon'?'selected':''}>Amazon</option>
+              <option value="flipkart" ${selectedPlatform==='flipkart'?'selected':''}>Flipkart</option>
+              <option value="myntra" ${selectedPlatform==='myntra'?'selected':''}>Myntra</option>
+              <option value="flex" ${selectedPlatform==='flex'?'selected':''}>Flex</option>
             </select>
           </td>
           <td><input type="text" class="bulk-orderid" value="${data.orderId||''}" placeholder="Order ID/AWB"></td>
           <td><input type="text" class="bulk-pname" list="product-list" value="${data.productName||''}" placeholder="Type or select product"></td>
+          <td><input type="number" class="bulk-qty" value="${data.qty||1}" min="1" step="1" placeholder="1"></td>
           <td><input type="date" class="bulk-date" value="${data.date||today}"></td>
           <td>
             <select class="bulk-type">
@@ -2520,6 +2333,63 @@
       updateBulkCount();
     }
 
+    function splitBulkLine(line) {
+      const sep = line.includes('\t') ? '\t' : ',';
+      const cols = [];
+      let cur = '';
+      let inQ = false;
+      for (const ch of line) {
+        if (ch === '"') inQ = !inQ;
+        else if (ch === sep && !inQ) { cols.push(cur.trim()); cur = ''; }
+        else cur += ch;
+      }
+      cols.push(cur.trim());
+      return cols.map(c => c.replace(/^"|"$/g, '').trim());
+    }
+
+    function normalizeBulkHeader(value) {
+      return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    }
+
+    function parseBulkQty(value) {
+      const qty = parseFloat(String(value ?? '').replace(/[^0-9.]/g, ''));
+      return qty > 0 ? qty : 1;
+    }
+
+    function normalizeBulkPlatform(value) {
+      const text = String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (text.includes('flipkart') || text.includes('flipcart') || text === 'fk') return 'flipkart';
+      if (text.includes('meesho')) return 'meesho';
+      if (text.includes('amazon')) return 'amazon';
+      if (text.includes('myntra')) return 'myntra';
+      if (text.includes('flex')) return 'flex';
+      return '';
+    }
+
+    function normalizeBulkReturnType(value) {
+      const text = String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (text.includes('rto') || text.includes('courier')) return 'RTO (Courier Return)';
+      if (text.includes('customer') || text.includes('custmar') || text.includes('return')) return 'Customer Return';
+      return '';
+    }
+
+    function findBulkHeaderIndex(headerCells, key) {
+      if (key === 'platform') return headerCells.findIndex(h => h.includes('platform') || h.includes('portal') || h.includes('marketplace') || h.includes('channel') || h.includes('ecommerce'));
+      if (key === 'orderId') return headerCells.findIndex(h => h.includes('order') || h.includes('awb') || h.includes('tracking') || h.includes('shipment'));
+      if (key === 'productName') {
+        let idx = headerCells.findIndex(h => (h.includes('productname') || h.includes('itemname') || h.includes('skuname')) && !h.includes('quantity') && h !== 'qty');
+        if (idx >= 0) return idx;
+        idx = headerCells.findIndex(h => (h.includes('product') || h.includes('item') || h.includes('sku') || h.includes('name')) && !h.includes('quantity') && !h.includes('qty'));
+        return idx;
+      }
+      if (key === 'qty') return headerCells.findIndex(h => h === 'qty' || h.includes('quantity') || h.includes('returnqty') || h.includes('productqty'));
+      if (key === 'date') return headerCells.findIndex(h => h.includes('date'));
+      if (key === 'type') return headerCells.findIndex(h => h.includes('type') || h.includes('reason'));
+      if (key === 'status') return headerCells.findIndex(h => h.includes('status'));
+      if (key === 'amount') return headerCells.findIndex(h => h.includes('amount') || h.includes('claim') || h.includes('refund'));
+      return -1;
+    }
+
     function parseBulkPaste() {
       const raw = document.getElementById('bulk-paste-area').value;
       const lines = raw.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -2532,6 +2402,10 @@
       const validTypes = ['Customer Return', 'RTO (Courier Return)'];
       const validStatuses = ['pending', 'received', 'damaged', 'claim_filed', 'claim_approved'];
       const today = new Date().toISOString().split('T')[0];
+      const headerCells = splitBulkLine(lines[0]).map(normalizeBulkHeader);
+      const headerIndex = key => findBulkHeaderIndex(headerCells, key);
+      const hasHeader = headerIndex('platform') >= 0 && headerIndex('productName') >= 0;
+      const dataLines = hasHeader ? lines.slice(1) : lines;
 
       // Remove any existing rows that are still empty (untouched default rows),
       // so pasted data isn't mixed up with leftover blank rows.
@@ -2547,15 +2421,33 @@
       let addedCount = 0;
       let skippedCount = 0;
 
-      lines.forEach(line => {
+      dataLines.forEach(line => {
         // auto-detect separator: tab takes priority if present, else comma
-        const parts = (line.includes('\t') ? line.split('\t') : line.split(',')).map(p => p.trim());
+        const parts = splitBulkLine(line);
 
         // find product name: only required field. If just one column was pasted, treat it as product name.
-        let [platformRaw, orderId, productName, dateRaw, typeRaw, statusRaw, amountRaw] = parts;
-        if (parts.length === 1) {
+        let platformRaw, orderId, productName, qtyRaw, dateRaw, typeRaw, statusRaw, amountRaw;
+        if (hasHeader) {
+          platformRaw = parts[headerIndex('platform')];
+          orderId = parts[headerIndex('orderId')];
+          productName = parts[headerIndex('productName')];
+          qtyRaw = parts[headerIndex('qty')];
+          dateRaw = parts[headerIndex('date')];
+          typeRaw = parts[headerIndex('type')];
+          statusRaw = parts[headerIndex('status')];
+          amountRaw = parts[headerIndex('amount')];
+        } else if (parts.length === 1) {
           productName = parts[0];
-          platformRaw = orderId = dateRaw = typeRaw = statusRaw = amountRaw = '';
+          platformRaw = orderId = qtyRaw = dateRaw = typeRaw = statusRaw = amountRaw = '';
+        } else {
+          [platformRaw, orderId, productName, qtyRaw, dateRaw, typeRaw, statusRaw, amountRaw] = parts;
+          if (/^\d{4}-\d{2}-\d{2}$/.test(qtyRaw || '') || validTypes.some(t => t.toLowerCase() === String(qtyRaw || '').toLowerCase())) {
+            amountRaw = statusRaw;
+            statusRaw = typeRaw;
+            typeRaw = dateRaw;
+            dateRaw = qtyRaw;
+            qtyRaw = '';
+          }
         }
 
         productName = (productName || '').trim();
@@ -2564,15 +2456,13 @@
           return;
         }
 
-        let platform = (platformRaw || '').toLowerCase().trim();
-        if (!validPlatforms.includes(platform)) platform = 'meesho';
+        let platform = normalizeBulkPlatform(platformRaw) || parts.map(normalizeBulkPlatform).find(Boolean) || 'meesho';
+        const qty = parseBulkQty(qtyRaw);
 
         let date = (dateRaw || '').trim();
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) date = today;
 
-        let type = (typeRaw || '').trim();
-        const typeMatch = validTypes.find(t => t.toLowerCase() === type.toLowerCase());
-        type = typeMatch || 'Customer Return';
+        let type = normalizeBulkReturnType(typeRaw) || parts.map(normalizeBulkReturnType).find(Boolean) || 'Customer Return';
 
         let status = (statusRaw || '').toLowerCase().trim().replace(/\s+/g, '_');
         if (!validStatuses.includes(status)) status = 'pending';
@@ -2583,6 +2473,7 @@
           platform,
           orderId: (orderId || '').trim(),
           productName,
+          qty,
           date,
           type,
           status,
@@ -2635,6 +2526,7 @@
         const platform = tr.querySelector('.bulk-platform').value;
         const orderId = tr.querySelector('.bulk-orderid').value.trim();
         const productName = tr.querySelector('.bulk-pname').value.trim();
+        const qty = parseBulkQty(tr.querySelector('.bulk-qty')?.value);
         const date = tr.querySelector('.bulk-date').value;
         const type = tr.querySelector('.bulk-type').value;
         const status = tr.querySelector('.bulk-status').value;
@@ -2645,14 +2537,7 @@
           tr.style.backgroundColor = '#ffeeee';
         } else {
           tr.style.backgroundColor = '';
-          entries.push({ platform, orderId, productName, date, type, status, amount });
-          if (type === 'RTO (Courier Return)') {
-            const prod = findProduct(productName);
-            if (prod) {
-              prod.stock = (prod.stock || 0) + 1;
-              prod.packingStock = (prod.packingStock || 0) + 1;
-            }
-          }
+          entries.push({ platform, orderId, productName, qty, date, type, status, amount });
         }
       });
 
@@ -2669,11 +2554,14 @@
       if (!confirm(`Kya aap ${entries.length} returns save karna chahte hain?`)) return;
 
       if (!store.ecomReturns) store.ecomReturns = [];
+      entries.forEach(entry => adjustStockForReturn(entry, 'add'));
       store.ecomReturns.push(...entries);
 
       await saveData();
       closeBulkReturnModal();
       renderReturns();
+      renderProducts();
+      updateProductList();
       showToast('success', `${entries.length} returns bulk added! Stock & Packing updated for RTO items.`);
     }
 
@@ -2807,13 +2695,6 @@
       document.getElementById('modal-title').textContent = idx >= 0 ? (isSale ? 'Edit Invoice' : 'Edit Purchase Bill') :
         (isSale ? 'Create Invoice' : 'Create Purchase Bill');
       document.getElementById('party-label').textContent = isSale ? 'Customer Name' : 'Vendor Name';
-      const createBtn = document.getElementById('party-create-btn');
-      if (createBtn) {
-        createBtn.textContent = isSale ? '+ Create Customer' : '+ Create Vendor';
-        createBtn.setAttribute('onclick', isSale ? "openPartyModal('customer')" : "openPartyModal('vendor')");
-      }
-      const dateLabel = document.querySelector('label[for="f-date"]') || document.getElementById('f-date')?.closest('.form-group')?.querySelector('label');
-      if (dateLabel) dateLabel.textContent = isSale ? 'Invoice Date' : 'Purchase Date';
       const parties = isSale ? store.customers : store.vendors;
       document.getElementById('party-list').innerHTML = parties.map(p => `<option value="${p.name}">`).join('');
       updateProductList();
@@ -2830,13 +2711,7 @@
         document.getElementById('f-phone').value = r.phone || (partyData ? partyData.phone : '');
         document.getElementById('f-status').value = r.status;
         document.getElementById('f-notes').value = r.notes;
-        document.getElementById('f-gst-type').value = 'intrastate';
-        const saleTypeField = document.getElementById('f-sale-type');
-        if (saleTypeField) {
-          saleTypeField.value = r.saleType || 'online';
-          saleTypeField.closest('.form-group').style.display = isSale ? 'block' : 'none';
-          saleTypeField.closest('.form-group').classList.toggle('is-hidden', !isSale);
-        }
+        document.getElementById('f-gst-type').value = r.gst?.taxType || 'auto';
         document.getElementById('items-body').innerHTML = '';
         r.items.forEach(it => addItemRow(it));
       } else {
@@ -2848,26 +2723,10 @@
         document.getElementById('f-phone').value = '';
         document.getElementById('f-status').value = 'pending';
         document.getElementById('f-notes').value = '';
-        document.getElementById('f-gst-type').value = 'intrastate';
-        const saleTypeField = document.getElementById('f-sale-type');
-        if (saleTypeField) {
-          saleTypeField.value = 'online';
-          saleTypeField.closest('.form-group').style.display = isSale ? 'block' : 'none';
-          saleTypeField.closest('.form-group').classList.toggle('is-hidden', !isSale);
-        }
+        document.getElementById('f-gst-type').value = 'auto';
         document.getElementById('items-body').innerHTML = '';
       }
       updateTotals();
-      // Reset GST toggle to ON when modal opens
-      gstEnabled = true;
-      const gstBtn = document.getElementById('gst-toggle-btn');
-      const gstLabel = document.getElementById('gst-toggle-label');
-      if (gstBtn && gstLabel) {
-        gstLabel.textContent = 'ON';
-        gstBtn.style.background = '#e8f5e9';
-        gstBtn.style.borderColor = '#43a047';
-        gstBtn.style.color = '#2e7d32';
-      }
       document.getElementById('invoice-modal').classList.add('open');
       setTimeout(() => document.getElementById('f-party').focus(), 100);
       if (onOpenCallback) {
@@ -2891,10 +2750,11 @@
       const tr = document.createElement('tr');
       tr.innerHTML = `
           <td><input type="text" class="i-name" value="${data.name||''}" placeholder="Item name" required></td>
+          <td><input type="text" class="i-hsn" value="${data.hsn||''}" placeholder="HSN/SAC"></td>
           <td><input type="number" class="i-qty" value="${data.qty||1}" min="0.01" step="any" oninput="updateTotals()" required></td>
           <td><input type="text" class="i-unit" value="${data.unit||'pcs'}" placeholder="unit"></td>
           <td><input type="number" class="i-price" value="${data.price||0}" min="0" step="any" oninput="updateTotals()" required></td>
-          <td><input type="number" class="i-gst" value="${gstEnabled ? (data.gst ?? 18) : 0}" min="0" max="100" step="any" oninput="updateTotals()" style="width:100%;text-align:center;" aria-label="GST percent"></td>
+          <td><input type="number" class="i-gst" value="${data.gst||0}" min="0" max="100" oninput="updateTotals()"></td>
           <td><button class="btn sm icon danger" onclick="this.closest('tr').remove();updateTotals()"><i class="ti ti-trash"></i></button></td>`;
       document.getElementById('items-body').appendChild(tr);
     }
@@ -2904,49 +2764,15 @@
       const qty = parseFloat(document.getElementById('quick-qty').value) || 1;
       const prod = findProduct(pName);
       if (!prod) { alert('Product list mein nahi mila!'); return; }
-      if (currentType === 'sale' && (prod.stock || 0) <= 0) {
-        alert(`${prod.name} out of stock hai. Ye product sell nahi ho sakta.`);
-        return;
-      }
       if (currentType === 'sale' && (prod.stock || 0) < qty) {
         alert(`Stock kam hai! Available: ${prod.stock||0}`);
         return;
       }
-      addItemRow({ name: prod.name, qty, unit: prod.unit, price: currentType === 'sale' ? prod.salePrice :
+      addItemRow({ name: prod.name, hsn: prod.hsn || '', qty, unit: prod.unit, price: currentType === 'sale' ? prod.salePrice :
           prod.purchasePrice, gst: prod.gst });
       updateTotals();
       document.getElementById('quick-product').value = '';
       document.getElementById('quick-qty').value = '1';
-    }
-
-    let gstEnabled = true;
-
-    function toggleGst() {
-      gstEnabled = !gstEnabled;
-      const btn = document.getElementById('gst-toggle-btn');
-      const label = document.getElementById('gst-toggle-label');
-      if (gstEnabled) {
-        label.textContent = 'ON';
-        btn.style.background = '#e8f5e9';
-        btn.style.borderColor = '#43a047';
-        btn.style.color = '#2e7d32';
-        document.querySelectorAll('#items-body tr').forEach(tr => {
-          const nameInput = tr.querySelector('.i-name');
-          const prod = nameInput ? findProduct(nameInput.value) : null;
-          const gstInput = tr.querySelector('.i-gst');
-          if (gstInput) gstInput.value = prod ? (prod.gst || 18) : 18;
-        });
-      } else {
-        label.textContent = 'OFF';
-        btn.style.background = '#ffeaea';
-        btn.style.borderColor = '#e53935';
-        btn.style.color = '#c62828';
-        document.querySelectorAll('#items-body tr').forEach(tr => {
-          const gstInput = tr.querySelector('.i-gst');
-          if (gstInput) gstInput.value = 0;
-        });
-      }
-      updateTotals();
     }
 
     function updateTotals() {
@@ -2959,17 +2785,19 @@
         });
       });
       const party = document.getElementById('f-party').value.trim();
-      const taxType = 'intrastate';
+      const gstChoice = document.getElementById('f-gst-type')?.value || 'auto';
+      const autoType = resolveGstTaxType(currentType, party);
+      const taxType = gstChoice === 'auto' ? autoType : gstChoice;
       const t = calcTotals(items, taxType);
       document.getElementById('t-sub').textContent = fmt(t.sub);
       document.getElementById('t-gst').textContent = fmt(t.gst);
       document.getElementById('t-cgst').textContent = fmt(t.cgst);
       document.getElementById('t-sgst').textContent = fmt(t.sgst);
       document.getElementById('t-igst').textContent = fmt(t.igst);
-      document.getElementById('t-cgst-row').style.display = 'none';
-      document.getElementById('t-sgst-row').style.display = 'none';
-      document.getElementById('t-igst-row').style.display = 'none';
-      document.getElementById('t-gst-type').textContent = '18%';
+      document.getElementById('t-cgst-row').style.display = taxType === 'interstate' ? 'none' : 'flex';
+      document.getElementById('t-sgst-row').style.display = taxType === 'interstate' ? 'none' : 'flex';
+      document.getElementById('t-igst-row').style.display = taxType === 'interstate' ? 'flex' : 'none';
+      document.getElementById('t-gst-type').textContent = taxType === 'interstate' ? 'IGST' : 'CGST + SGST';
       document.getElementById('t-total').textContent = fmt(t.total);
     }
 
@@ -2982,54 +2810,25 @@
       const status = document.getElementById('f-status').value;
       const notes = document.getElementById('f-notes').value.trim();
       const phone = document.getElementById('f-phone').value;
-      const gstChoice = 'intrastate';
-      const saleType = currentType === 'sale' ? (document.getElementById('f-sale-type')?.value || 'online') : '';
+      const gstChoice = document.getElementById('f-gst-type')?.value || 'auto';
 
       if (!party || !num || !date) { alert('Party name, bill number aur date daalna zaruri hai.'); return; }
 
       const items = [];
       document.querySelectorAll('#items-body tr').forEach(tr => {
         const name = tr.querySelector('.i-name').value.trim();
+        const hsn = tr.querySelector('.i-hsn')?.value.trim() || '';
         const qty = parseFloat(tr.querySelector('.i-qty').value) || 0;
         const unit = tr.querySelector('.i-unit').value.trim();
         const price = parseFloat(tr.querySelector('.i-price').value) || 0;
-        const gst = parseFloat(tr.querySelector('.i-gst')?.value) || 0;
-        if (name) items.push({ name, qty, unit, price, gst });
+        const gst = parseFloat(tr.querySelector('.i-gst').value) || 0;
+        if (name) items.push({ name, hsn, qty, unit, price, gst });
       });
 
       if (!items.length) { alert('Kam se kam ek item add karein.'); return; }
 
       const invoiceNo = prefix + num;
       const typeKey = currentType === 'sale' ? 'sales' : 'purchases';
-
-      if (currentType === 'sale') {
-        const oldQty = {};
-        if (editIndex >= 0 && store.sales[editIndex]) {
-          (store.sales[editIndex].items || []).forEach(item => {
-            const key = String(item.name || '').trim().toLowerCase();
-            oldQty[key] = (oldQty[key] || 0) + (parseFloat(item.qty) || 0);
-          });
-        }
-
-        for (const item of items) {
-          const prod = findProduct(item.name);
-          if (!prod) {
-            alert(`"${item.name}" product list mein nahi mila. Sale save nahi hogi.`);
-            return;
-          }
-          const key = String(item.name || '').trim().toLowerCase();
-          const available = (parseFloat(prod.stock) || 0) + (oldQty[key] || 0);
-          if (available <= 0) {
-            alert(`"${item.name}" out of stock hai. Ye product sell nahi ho sakta.`);
-            return;
-          }
-          if ((parseFloat(item.qty) || 0) > available) {
-            alert(`"${item.name}" ka stock kam hai. Available: ${available}`);
-            return;
-          }
-        }
-      }
-
       const partyRecord = getPartyRecord(currentType, party);
       const autoTaxType = resolveGstTaxType(currentType, party);
       const taxType = gstChoice === 'auto' ? autoTaxType : gstChoice;
@@ -3042,7 +2841,6 @@
         status,
         notes,
         phone,
-        saleType,
         items,
         gst: {
           taxType,
@@ -3111,68 +2909,15 @@
       const tbody = document.getElementById(type + '-tbody');
       const bills = isC ? store.sales : store.purchases;
       if (!data.length) { tbody.innerHTML =
-          `<tr><td colspan="8" class="empty">Koi ${isC ? 'customer' : 'vendor'} nahi. Abhi add karein.</td></tr>`; return; }
+          `<tr><td colspan="7" class="empty">Koi ${isC ? 'customer' : 'vendor'} nahi. Abhi add karein.</td></tr>`; return; }
       tbody.innerHTML = data.map((p, i) => {
         const related = bills.filter(b => b.party === p.name);
         const total = related.reduce((a, b) => a + calcTotals(b.items).total, 0);
-        const cbClass = isC ? 'customer-checkbox' : 'vendor-checkbox';
-        const uiFn = isC ? 'updateCustomerSelectionUI()' : 'updateVendorSelectionUI()';
         const actions = isC ?
           `<button class="btn sm" onclick="openCustomerLedgerByIndex(${i})"><i class="ti ti-eye"></i>View</button> <button class="btn sm icon danger" onclick="deleteParty(${i},'customers')"><i class="ti ti-trash"></i></button>` :
           `<button class="btn sm icon danger" onclick="deleteParty(${i},'vendors')"><i class="ti ti-trash"></i></button>`;
-        return `<tr><td><input type="checkbox" class="${cbClass}" data-idx="${i}" onchange="${uiFn}"></td><td>${i+1}</td><td class="cell-strong">${p.name}</td><td>${p.phone||'-'}</td><td>${p.gstin||'-'}</td><td>${related.length}</td><td class="cell-strong">${fmt(total)}</td><td>${actions}</td></tr>`;
+        return `<tr><td>${i+1}</td><td class="cell-strong">${p.name}</td><td>${p.phone||'-'}</td><td>${p.gstin||'-'}</td><td>${related.length}</td><td class="cell-strong">${fmt(total)}</td><td>${actions}</td></tr>`;
       }).join('');
-      if (isC) updateCustomerSelectionUI(); else updateVendorSelectionUI();
-    }
-
-    function updateCustomerSelectionUI() {
-      const checked = document.querySelectorAll('.customer-checkbox:checked');
-      const btn = document.getElementById('delete-selected-customers-btn');
-      const countEl = document.getElementById('selected-customer-count');
-      if (btn && countEl) { btn.style.display = checked.length ? 'inline-flex' : 'none'; countEl.textContent = checked.length; }
-      const all = document.querySelectorAll('.customer-checkbox');
-      const cb = document.getElementById('select-all-customers');
-      if (cb) { cb.checked = all.length > 0 && checked.length === all.length; cb.indeterminate = checked.length > 0 && checked.length < all.length; }
-    }
-
-    function toggleAllCustomers(cb) {
-      document.querySelectorAll('.customer-checkbox').forEach(c => c.checked = cb.checked);
-      updateCustomerSelectionUI();
-    }
-
-    async function deleteSelectedCustomers() {
-      const checked = document.querySelectorAll('.customer-checkbox:checked');
-      if (!checked.length) return;
-      if (!confirm(`Kya aap ${checked.length} selected customers delete karna chahte hain?`)) return;
-      if (!await verifyActionPassword('Delete Selected Customers')) return;
-      Array.from(checked).map(c => parseInt(c.dataset.idx)).sort((a,b)=>b-a).forEach(idx => store.customers.splice(idx,1));
-      await saveData(); renderParties('customers');
-      showToast('success', `${checked.length} customers delete ho gaye!`);
-    }
-
-    function updateVendorSelectionUI() {
-      const checked = document.querySelectorAll('.vendor-checkbox:checked');
-      const btn = document.getElementById('delete-selected-vendors-btn');
-      const countEl = document.getElementById('selected-vendor-count');
-      if (btn && countEl) { btn.style.display = checked.length ? 'inline-flex' : 'none'; countEl.textContent = checked.length; }
-      const all = document.querySelectorAll('.vendor-checkbox');
-      const cb = document.getElementById('select-all-vendors');
-      if (cb) { cb.checked = all.length > 0 && checked.length === all.length; cb.indeterminate = checked.length > 0 && checked.length < all.length; }
-    }
-
-    function toggleAllVendors(cb) {
-      document.querySelectorAll('.vendor-checkbox').forEach(c => c.checked = cb.checked);
-      updateVendorSelectionUI();
-    }
-
-    async function deleteSelectedVendors() {
-      const checked = document.querySelectorAll('.vendor-checkbox:checked');
-      if (!checked.length) return;
-      if (!confirm(`Kya aap ${checked.length} selected vendors delete karna chahte hain?`)) return;
-      if (!await verifyActionPassword('Delete Selected Vendors')) return;
-      Array.from(checked).map(c => parseInt(c.dataset.idx)).sort((a,b)=>b-a).forEach(idx => store.vendors.splice(idx,1));
-      await saveData(); renderParties('vendors');
-      showToast('success', `${checked.length} vendors delete ho gaye!`);
     }
 
     function openPartyModal(type) {
@@ -3216,25 +2961,14 @@
     // ─── PRODUCTS ──────────────────────────────────────────────────────────────
     function renderProducts() {
       const tbody = document.getElementById('products-tbody');
-      const rows = (store.products || []).map((p, i) => ({ p, i })).filter(({ p }) => {
-        const stock = Number(p.stock || 0);
-        if (productStockFilter === 'in') return stock > 0;
-        if (productStockFilter === 'low') return stock > 0 && stock <= 5;
-        if (productStockFilter === 'out') return stock <= 0;
-        return true;
-      });
-
       if (!store.products.length) { tbody.innerHTML =
-          '<tr><td colspan="9" class="empty">Koi product nahi. Abhi add karein.</td></tr>'; updateProductSelectionUI(); return; }
-      if (!rows.length) { tbody.innerHTML =
-          '<tr><td colspan="9" class="empty">Is filter me koi product nahi mila.</td></tr>'; updateProductSelectionUI(); return; }
-      tbody.innerHTML = rows.map(({ p, i }, rowNo) => {
+          '<tr><td colspan="9" class="empty">Koi product nahi. Abhi add karein.</td></tr>'; return; }
+      tbody.innerHTML = store.products.map((p, i) => {
         const packing = p.packingStock || 0;
         const stockColor = (p.stock || 0) <= 0 ? 'var(--red)' : (p.stock || 0) <= 5 ? 'var(--amber)' : 'var(--green)';
         const packingColor = packing <= 0 ? 'var(--red)' : 'var(--green)';
         return `<tr>
-          <td><input type="checkbox" class="product-select" data-index="${i}" onchange="updateProductSelectionUI()"></td>
-          <td>${rowNo+1}</td><td class="cell-strong">${p.name}</td><td>${p.unit||'-'}</td>
+          <td>${i+1}</td><td class="cell-strong">${p.name}</td><td>${p.hsn || '-'}</td><td>${p.unit||'-'}</td>
           <td class="cell-strong">${fmt(p.salePrice||0)}</td><td>${fmt(p.purchasePrice||0)}</td>
           <td>${p.gst||0}%</td>
           <td style="color:${stockColor}"><strong>${p.stock||0}</strong> <small style="color:${packingColor}">(Packing: ${packing})</small></td>
@@ -3244,143 +2978,33 @@
           </td>
         </tr>`;
       }).join('');
-      updateProductSelectionUI();
     }
 
-    function setProductStockFilter(value) {
-      productStockFilter = value || 'all';
-      renderProducts();
-    }
+    function updateProductList() {
+      document.getElementById('product-list').innerHTML = store.products.map(p =>
+        `<option value="${p.name}">Stock: ${p.stock||0} (Packing: ${p.packingStock||0}) | ${fmt(p.salePrice||0)} / ${p.unit||'unit'}</option>`
+      ).join('');
 
-    function getSelectedProductIndexes() {
-      return [...document.querySelectorAll('.product-select:checked')]
-        .map(cb => parseInt(cb.dataset.index, 10))
-        .filter(i => !Number.isNaN(i));
-    }
-
-    function updateProductSelectionUI() {
-      const selected = getSelectedProductIndexes();
-      const btn = document.getElementById('delete-selected-products-btn');
-      const count = document.getElementById('selected-product-count');
-      if (btn) btn.style.display = selected.length ? 'inline-flex' : 'none';
-      if (count) count.textContent = selected.length;
-      const all = document.getElementById('select-all-products');
-      const boxes = [...document.querySelectorAll('.product-select')];
-      if (all) {
-        all.checked = boxes.length > 0 && boxes.every(cb => cb.checked);
-        all.indeterminate = selected.length > 0 && selected.length < boxes.length;
-      }
-    }
-
-    function toggleAllProducts(checkbox) {
-      document.querySelectorAll('.product-select').forEach(cb => { cb.checked = checkbox.checked; });
-      updateProductSelectionUI();
-    }
-
-    async function deleteSelectedProducts() {
-      const selected = getSelectedProductIndexes();
-      if (!selected.length) { alert('Pehle product select karein.'); return; }
-      if (!confirm(`${selected.length} selected products delete karna hai?`)) return;
-      if (!await verifyActionPassword('Delete Selected Products')) return;
-      selected.sort((a, b) => b - a).forEach(index => {
-        if (index >= 0 && index < store.products.length) store.products.splice(index, 1);
-      });
-      await saveData();
-      renderProducts();
-      updateProductList();
-      showToast('success', `${selected.length} products delete ho gaye.`);
-    }
-
-    let _productDropdownActive = -1;
-
-    function updateProductList(query = '') {
-      // keep datalist in sync for other usages
-      const term = String(query || '').trim().toLowerCase();
-      const filtered = (store.products || []).filter(p => {
-        if (!term) return true;
-        return String(p.name || '').toLowerCase().includes(term);
-      }).slice(0, 80);
-      const dl = document.getElementById('product-list');
-      if (dl) dl.innerHTML = filtered.map(p => `<option value="${p.name}">`).join('');
-    }
-
-    function getFilteredDropdownProducts(term) {
-      const filter = document.getElementById('quick-product-filter')?.value || 'all';
-      return (store.products || []).filter(p => {
-        const stock = Number(p.stock || 0);
-        if (filter === 'in' && stock <= 0) return false;
-        if (filter === 'low' && !(stock > 0 && stock <= 5)) return false;
-        if (filter === 'out' && stock > 0) return false;
-        if (term) {
-          const name = String(p.name || '').toLowerCase();
-          return name.includes(term.toLowerCase());
-        }
-        return true;
-      }).slice(0, 60);
-    }
-
-    function showProductDropdown(val) {
-      const dd = document.getElementById('product-dropdown');
-      if (!dd) return;
-      const term = (val || '').trim();
-      const products = getFilteredDropdownProducts(term);
-      _productDropdownActive = -1;
-      if (!products.length) { dd.style.display = 'none'; return; }
-      dd.innerHTML = products.map((p, i) => {
+      const chipList = document.getElementById('stock-chip-list');
+      if (!chipList) return;
+      chipList.innerHTML = store.products.map(p => {
         const stock = p.stock || 0;
-        const stockColor = stock <= 0 ? '#e53935' : stock <= 5 ? '#f57c00' : '#2e7d32';
-        const price = currentType === 'sale' ? (p.salePrice || 0) : (p.purchasePrice || 0);
-        return `<div class="pd-item" data-index="${i}" data-name="${p.name}" onmousedown="selectProductFromDropdown('${p.name.replace(/'/g,"\\'")}');event.preventDefault();" onmouseover="setDropdownActive(${i})">
-          <span class="pd-name">${p.name}</span>
-          <span class="pd-meta" style="color:${stockColor}">Stock: ${stock}</span>
-          <span class="pd-meta">₹${price.toLocaleString('en-IN')} / ${p.unit||'pcs'}</span>
-        </div>`;
+        const packing = p.packingStock || 0;
+        const color = stock <= 0 ? 'var(--red)' : stock <= 5 ? 'var(--amber)' : 'var(--green)';
+        const label = stock <= 0 ? '⚠ Out of stock' : `Stock: ${stock} | Packing: ${packing}`;
+        return `<span onclick="quickAddChip('${p.name.replace(/'/g,"\\'")}',${p.salePrice||0},'${(p.unit||'pcs').replace(/'/g,"\\'")}',${p.gst||0},${stock})"
+            style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:650;transition:background .15s"
+            onmouseover="this.style.background='#eef6ff'" onmouseout="this.style.background='#fff'">
+            <span style="font-weight:750;color:var(--text)">${p.name}</span>
+            <span style="color:${color};font-size:11px">${label}</span>
+          </span>`;
       }).join('');
-      dd.style.display = 'block';
-    }
-
-    function setDropdownActive(i) {
-      _productDropdownActive = i;
-      document.querySelectorAll('#product-dropdown .pd-item').forEach((el, idx) => {
-        el.style.background = idx === i ? '#e8f0fe' : '';
-      });
-    }
-
-    function selectProductFromDropdown(name) {
-      const inp = document.getElementById('quick-product');
-      if (inp) inp.value = name;
-      const dd = document.getElementById('product-dropdown');
-      if (dd) dd.style.display = 'none';
-    }
-
-    function handleProductKey(e) {
-      const dd = document.getElementById('product-dropdown');
-      if (!dd || dd.style.display === 'none') { if (e.key === 'Enter') addQuickProduct(); return; }
-      const items = dd.querySelectorAll('.pd-item');
-      if (e.key === 'ArrowDown') { e.preventDefault(); setDropdownActive(Math.min(_productDropdownActive + 1, items.length - 1)); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); setDropdownActive(Math.max(_productDropdownActive - 1, 0)); }
-      else if (e.key === 'Enter') {
-        e.preventDefault();
-        if (_productDropdownActive >= 0 && items[_productDropdownActive]) {
-          selectProductFromDropdown(items[_productDropdownActive].dataset.name);
-        } else { addQuickProduct(); }
-      } else if (e.key === 'Escape') { dd.style.display = 'none'; }
-    }
-
-    function updateQuickProductSuggestions(input) {
-      updateProductList(input?.value || '');
-    }
-
-    function filterQuickProducts() {
-      const quickProduct = document.getElementById('quick-product');
-      if (quickProduct) { quickProduct.value = ''; showProductDropdown(''); }
-      updateProductList();
     }
 
     function quickAddChip(name, price, unit, gst, stock) {
       if (stock <= 0) { alert(`${name} out of stock hai!`); return; }
       const prod = findProduct(name) || {};
-      addItemRow({ name, qty: 1, unit, price, gst });
+      addItemRow({ name, hsn: prod.hsn || '', qty: 1, unit, price, gst });
       updateTotals();
     }
 
@@ -3391,6 +3015,7 @@
         const p = store.products[idx];
         document.getElementById('pr-name').value = p.name;
         document.getElementById('pr-unit').value = p.unit;
+        document.getElementById('pr-hsn').value = p.hsn || '';
         document.getElementById('pr-sale').value = p.salePrice;
         document.getElementById('pr-purchase').value = p.purchasePrice;
         document.getElementById('pr-gst').value = p.gst;
@@ -3398,6 +3023,7 @@
         document.getElementById('product-modal-title').textContent = 'Edit Product';
       } else {
         document.getElementById('pr-name').value = '';
+        document.getElementById('pr-hsn').value = '';
         document.getElementById('pr-unit').value = 'pcs';
         document.getElementById('pr-sale').value = '';
         document.getElementById('pr-purchase').value = '';
@@ -3413,10 +3039,11 @@
 	document.getElementById('product-modal').classList.remove('open'); }
     async function saveProduct() {
   const name = document.getElementById('pr-name').value.trim();
+  const hsn = document.getElementById('pr-hsn').value.trim();
   const unit = document.getElementById('pr-unit').value.trim();
   const salePrice = parseFloat(document.getElementById('pr-sale').value) || 0;
   const purchasePrice = parseFloat(document.getElementById('pr-purchase').value) || 0;
-  const gst = 18;
+  const gst = parseFloat(document.getElementById('pr-gst').value) || 0;
   const stock = parseFloat(document.getElementById('pr-stock').value) || 0;
 
   if (!name) {
@@ -3435,6 +3062,7 @@
 
   const p = {
     name,
+    hsn,
     unit,
     salePrice,
     purchasePrice,
@@ -3461,7 +3089,6 @@
         store.products.splice(index, 1);
         await saveData();
         renderProducts();
-        updateProductList();
         showToast('success', 'Product deleted successfully.');
       }
     }
@@ -3539,21 +3166,32 @@
       const title = type === 'sales' ? 'SALE INVOICE' : 'PURCHASE BILL';
       const billLabel = type === 'sales' ? 'Invoice No' : 'Bill No';
       const biz = store.business || defaultStore.business;
-      const gstModeLabel = '18% GST';
+      const gstModeLabel = taxType === 'interstate' ? 'IGST' : 'CGST + SGST';
 
       const rows = r.items.map((item, i) => {
         const c = calcItem(item);
+        const cgst = taxType === 'interstate' ? 0 : c.tax / 2;
+        const sgst = taxType === 'interstate' ? 0 : c.tax / 2;
+        const igst = taxType === 'interstate' ? c.tax : 0;
         return `<tr>
             <td style="font-weight:700;color:#667085">${i+1}</td>
             <td style="font-weight:700">${esc(item.name)}</td>
+            <td>${esc(item.hsn || '-')}</td>
             <td>${esc(item.qty)} ${esc(item.unit)}</td>
             <td>${fmt(item.price)}</td>
-            <td>18%</td>
+            <td>${esc(item.gst)}%</td>
             <td>${fmt(c.taxable)}</td>
-            <td>${fmt(c.tax)}</td>
+            ${taxType === 'interstate' ? `<td>${fmt(igst)}</td>` : `<td>${fmt(cgst)}</td><td>${fmt(sgst)}</td>`}
             <td style="font-weight:800;color:#1663a6">${fmt(c.total)}</td>
           </tr>`;
       }).join('');
+
+      const gstSummaryRows = totals.breakup.map(row => `<tr>
+          <td>${row.rate}%</td>
+          <td>${fmt(row.taxable)}</td>
+          ${taxType === 'interstate' ? `<td>${fmt(row.igst)}</td>` : `<td>${fmt(row.cgst)}</td><td>${fmt(row.sgst)}</td>`}
+          <td>${fmt(row.totalTax)}</td>
+        </tr>`).join('');
 
       return `
         <div class="inv-header">
@@ -3572,7 +3210,7 @@
               <div>${billLabel}: <strong>${esc(r.invoiceNo)}</strong></div>
               <div>Date: <strong>${niceDate(r.date)}</strong></div>
               ${r.due ? `<div>Due: <strong>${niceDate(r.due)}</strong></div>` : ''}
-              <div>GST: <strong>${gstModeLabel}</strong></div>
+              <div>GST Type: <strong>${gstModeLabel}</strong></div>
               <div>Status: <strong class="inv-status inv-status-${esc(r.status)}">${r.status.toUpperCase()}</strong></div>
             </div>
           </div>
@@ -3592,7 +3230,10 @@
             <div class="inv-section-label">Amount Summary</div>
             <div class="inv-amount-big">${fmt(totals.total)}</div>
             <div class="inv-amount-row"><span>Subtotal</span><span>${fmt(totals.sub)}</span></div>
-            <div class="inv-amount-row"><span>GST 18%</span><span>${fmt(totals.gst)}</span></div>
+            ${taxType === 'interstate'
+              ? `<div class="inv-amount-row"><span>IGST</span><span>${fmt(totals.igst)}</span></div>`
+              : `<div class="inv-amount-row"><span>CGST</span><span>${fmt(totals.cgst)}</span></div><div class="inv-amount-row"><span>SGST</span><span>${fmt(totals.sgst)}</span></div>`}
+            <div class="inv-amount-row"><span>Total GST</span><span>${fmt(totals.gst)}</span></div>
             <div class="inv-amount-row" style="font-weight:800;color:#182230;border-top:1px solid #d0dde8;margin-top:4px;padding-top:6px">
               <span>Grand Total</span><span style="color:#1663a6">${fmt(totals.total)}</span>
             </div>
@@ -3605,20 +3246,35 @@
               <tr>
                 <th>#</th>
                 <th>Item / Description</th>
+                <th>HSN/SAC</th>
                 <th>Qty & Unit</th>
                 <th>Rate</th>
                 <th>GST</th>
                 <th>Taxable</th>
-                <th>GST Amt</th>
+                ${taxType === 'interstate' ? '<th>IGST</th>' : '<th>CGST</th><th>SGST</th>'}
                 <th>Amount</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
             <tfoot>
-              <tr><td colspan="7" style="text-align:right;color:#667085;font-weight:700">Subtotal</td><td>${fmt(totals.sub)}</td></tr>
-              <tr><td colspan="7" style="text-align:right;color:#667085;font-weight:700">GST 18%</td><td>${fmt(totals.gst)}</td></tr>
-              <tr class="grand-total"><td colspan="7" style="text-align:right">Total Amount</td><td>${fmt(totals.total)}</td></tr>
+              <tr><td colspan="${taxType === 'interstate' ? 8 : 9}" style="text-align:right;color:#667085;font-weight:700">Subtotal</td><td>${fmt(totals.sub)}</td></tr>
+              <tr><td colspan="${taxType === 'interstate' ? 8 : 9}" style="text-align:right;color:#667085;font-weight:700">GST</td><td>${fmt(totals.gst)}</td></tr>
+              <tr class="grand-total"><td colspan="${taxType === 'interstate' ? 8 : 9}" style="text-align:right">Total Amount</td><td>${fmt(totals.total)}</td></tr>
             </tfoot>
+          </table>
+        </div>
+
+        <div class="inv-items-wrap" style="margin-top:14px;">
+          <table class="inv-table gst-summary-table">
+            <thead>
+              <tr>
+                <th>GST Rate</th>
+                <th>Taxable Value</th>
+                ${taxType === 'interstate' ? '<th>IGST</th>' : '<th>CGST</th><th>SGST</th>'}
+                <th>Total GST</th>
+              </tr>
+            </thead>
+            <tbody>${gstSummaryRows || `<tr><td colspan="${taxType === 'interstate' ? 4 : 5}">No GST</td></tr>`}</tbody>
           </table>
         </div>
 
@@ -3682,14 +3338,16 @@
 
     function activateEmployeeAccess() {
       document.getElementById('premium-modal').classList.remove('open');
-      openRazorpay();
+      document.getElementById('pay-transaction-id').value = '';
+      document.getElementById('payment-status-message').style.display = 'none';
+      document.getElementById('payment-modal').classList.add('open');
     }
 
     function closePaymentModal() { document.getElementById('payment-modal').classList.remove('open'); }
 
     async function submitPayment() {
       const txId = document.getElementById('pay-transaction-id').value.trim();
-      if (!txId) { alert('Transaction ID daalein.'); return; }
+      if (!txId) { alert('Transaction ID ya Card number daalein.'); return; }
       const msg = document.getElementById('payment-status-message');
       msg.style.display = 'block';
       msg.style.color = 'var(--amber)';
@@ -3705,55 +3363,6 @@
           showPage('employees', document.querySelector('[data-page="employees"]'));
         }, 1200);
       }, 1500);
-    }
-
-    function openRazorpay() {
-      const userEmail = window._fbCurrentEmail || '';
-      const options = {
-        key: 'rzp_live_YOUR_KEY_HERE', // 🔴 Apni Razorpay Live Key yahan daalo
-        amount: 5000, // ₹50 in paise
-        currency: 'INR',
-        name: 'BillPro',
-        description: 'Employee Premium Access - 1 Month',
-        image: '',
-        prefill: {
-          email: userEmail,
-          contact: '7210042800'
-        },
-        notes: {
-          adminUid: currentUser || ''
-        },
-        theme: {
-          color: '#1663a6'
-        },
-        handler: async function(response) {
-          // Payment successful
-          const txnId = response.razorpay_payment_id;
-          store._employeePaid = true;
-          store._razorpayTxnId = txnId;
-          await saveData();
-          updateEmployeesNavUI();
-          showToast('success', `Payment Successful! ID: ${txnId} — Employee Access Activated!`);
-          showPage('employees', document.querySelector('[data-page="employees"]'));
-        },
-        modal: {
-          ondismiss: function() {
-            showToast('error', 'Payment cancel ho gaya. Premium activate nahi hua.');
-          }
-        }
-      };
-      try {
-        const rzp = new Razorpay(options);
-        rzp.on('payment.failed', function(response) {
-          showToast('error', 'Payment fail ho gaya: ' + (response.error?.description || 'Unknown error'));
-        });
-        rzp.open();
-      } catch(e) {
-        // Razorpay not loaded fallback — show manual modal
-        document.getElementById('pay-transaction-id').value = '7210042800';
-        document.getElementById('payment-status-message').style.display = 'none';
-        document.getElementById('payment-modal').classList.add('open');
-      }
     }
 
     async function toggleEmployeeStatus(idx) {
@@ -4039,15 +3648,6 @@
     window.toggleAllSales = toggleAllSales;
     window.updateSaleSelectionUI = updateSaleSelectionUI;
     window.deleteSelectedSales = deleteSelectedSales;
-    window.deleteSelectedPurchases = deleteSelectedPurchases;
-    window.toggleAllPurchases = toggleAllPurchases;
-    window.updatePurchaseSelectionUI = updatePurchaseSelectionUI;
-    window.deleteSelectedCustomers = deleteSelectedCustomers;
-    window.toggleAllCustomers = toggleAllCustomers;
-    window.updateCustomerSelectionUI = updateCustomerSelectionUI;
-    window.deleteSelectedVendors = deleteSelectedVendors;
-    window.toggleAllVendors = toggleAllVendors;
-    window.updateVendorSelectionUI = updateVendorSelectionUI;
     window.openInvoiceView = openInvoiceView;
     window.printInvoice = printInvoice;
     window.handleEmployeesNavClick = handleEmployeesNavClick;
@@ -4080,10 +3680,6 @@
     window.deleteParty = deleteParty;
     window.deleteProduct = deleteProduct;
     window.deleteAllProducts = deleteAllProducts;
-    window.toggleAllProducts = toggleAllProducts;
-    window.updateProductSelectionUI = updateProductSelectionUI;
-    window.deleteSelectedProducts = deleteSelectedProducts;
-    window.setProductStockFilter = setProductStockFilter;
     window.exportSalesReport = exportSalesReport;
     window.exportPurchasesReport = exportPurchasesReport;
     window.exportCustomersReport = exportCustomersReport;
@@ -4106,20 +3702,6 @@
     window.closeCustomerLedger = closeCustomerLedger;
     window.deleteEmployeeRecord = deleteEmployeeRecord;
     window.quickAddChip = quickAddChip;
-    window.filterQuickProducts = filterQuickProducts;
-    window.updateQuickProductSuggestions = updateQuickProductSuggestions;
-    window.toggleGst = toggleGst;
-    window.showProductDropdown = showProductDropdown;
-    window.handleProductKey = handleProductKey;
-    window.selectProductFromDropdown = selectProductFromDropdown;
-    window.setDropdownActive = setDropdownActive;
-    document.addEventListener('click', function(e) {
-      const wrap = document.querySelector('.product-search-wrap');
-      if (wrap && !wrap.contains(e.target)) {
-        const dd = document.getElementById('product-dropdown');
-        if (dd) dd.style.display = 'none';
-      }
-    });
     window.ssShowTab = ssShowTab;
     window.ssRender = ssRender;
     window.ssClearDates = ssClearDates;
@@ -4217,8 +3799,6 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
-      overflow-x: hidden;
-      max-width: 100vw;
     }
 
     body {
@@ -4353,7 +3933,6 @@
       height: 100vh;
       min-height: 0;
       overflow: hidden;
-      max-width: 100vw;
       background:
         radial-gradient(circle at 35% 0%, rgba(22, 99, 166, .12), transparent 28%),
         linear-gradient(135deg, #edf5fb 0%, #f7fafc 48%, #eef8f2 100%);
@@ -4702,9 +4281,9 @@
 
     .search-wrap {
       position: relative;
-      flex: 1 1 200px;
+      flex: 1 1 280px;
       width: min(430px, 100%);
-      min-width: 0;
+      min-width: 240px;
     }
 
     .search-wrap i {
@@ -4815,16 +4394,6 @@
 
     .action-row .btn {
       flex: 0 1 auto;
-    }
-
-    .action-row select.btn {
-      min-height: 40px;
-      appearance: auto;
-      background: #fff;
-      color: var(--text);
-      border-color: var(--line);
-      font-weight: 800;
-      padding-right: 28px;
     }
 
     .btn.success {
@@ -5836,7 +5405,6 @@
     .invoice-modal-shell {
       width: min(1180px, 98vw);
       background: #f7f8fb;
-      overflow-x: hidden;
     }
 
     .create-invoice-head {
@@ -5911,15 +5479,14 @@
     }
 
     .invoice-create-body {
-      padding: 18px 20px 24px;
-      overflow-x: hidden;
+      padding: 18px 26px 24px;
     }
 
     .invoice-top-grid {
       display: grid;
-      grid-template-columns: 1fr 2fr;
-      gap: 20px;
-      margin-bottom: 20px;
+      grid-template-columns: minmax(320px, 1fr) minmax(520px, 2fr);
+      gap: 26px;
+      margin-bottom: 26px;
     }
 
     .soft-panel {
@@ -5954,9 +5521,8 @@
 
     .invoice-fields {
       display: grid;
-      grid-template-columns: 1fr 1fr 1.1fr 1.4fr;
+      grid-template-columns: 180px 180px minmax(260px, 1fr);
       gap: 12px;
-      align-items: end;
     }
 
     .invoice-fields .form-group label {
@@ -5970,45 +5536,18 @@
       border-radius: 8px;
       padding: 14px 16px 18px;
       margin-top: 20px;
-      border: 1px solid #ddecfb;
     }
-
-    .product-search-wrap { position: relative; }
-    .product-search-wrap input { width: 100%; }
-    .pd-item {
-      display: flex; align-items: center; gap: 10px;
-      padding: 8px 14px; cursor: pointer; font-size: 13px;
-      border-bottom: 1px solid #f0f3f7; transition: background .1s;
-    }
-    .pd-item:last-child { border-bottom: none; }
-    .pd-item:hover { background: #e8f0fe; }
-    .pd-name { font-weight: 700; color: #1a2236; flex: 1; font-size: 13.5px; }
-    .pd-meta { font-size: 12px; color: #667085; white-space: nowrap; }
 
     .quick-add-row {
       display: grid;
-      grid-template-columns: 220px minmax(260px, 1fr) 120px auto;
+      grid-template-columns: minmax(260px, 1fr) 140px auto;
       gap: 12px;
       margin-bottom: 18px;
-      align-items: center;
     }
 
-    .quick-add-row input,
-    .quick-add-row select {
+    .quick-add-row input {
       min-height: 45px;
       font-size: 16px;
-      border: 1px solid #cfd9e6;
-      border-radius: 8px;
-      background: #fff;
-      padding: 0 12px;
-      width: 100%;
-      outline: none;
-    }
-
-    .quick-add-row input:focus,
-    .quick-add-row select:focus {
-      border-color: var(--blue);
-      box-shadow: 0 0 0 3px rgba(24, 99, 166, .12);
     }
 
     .quick-add-row .btn {
@@ -6022,104 +5561,17 @@
       color: #616975;
       font-size: 13px;
       padding: 13px 14px;
-      text-align: left;
     }
 
     .invoice-create-body .items-table td {
       background: #fff;
-      padding: 12px 14px;
     }
 
-    .invoice-create-body .items-table input {
-      width: 100%;
-      min-height: 38px;
-      border: 1px solid #d6dfeb;
-      border-radius: 7px;
-      padding: 0 10px;
-      font-size: 14px;
-      background: #fff;
-    }
-
-    .invoice-bottom-grid {
-      display: grid;
-      grid-template-columns: minmax(300px, 420px) minmax(260px, 1fr);
-      gap: 18px;
-      align-items: start;
-      margin-top: 18px;
-    }
-
-    .total-section {
-      background: #fff;
-      border: 1px solid #d9e3ef;
-      border-radius: 8px;
-      padding: 14px 16px;
-      box-shadow: 0 10px 24px rgba(16, 24, 40, .06);
-    }
-
-    .total-head {
+    .stock-chips {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      padding-bottom: 10px;
-      margin-bottom: 8px;
-      border-bottom: 1px solid #eef2f6;
-      font-weight: 800;
-      color: #1d2939;
-    }
-
-    .total-head small {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-    }
-
-    .total-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 14px;
-      padding: 8px 0;
-      color: #475467;
-      font-weight: 700;
-    }
-
-    .total-row.grand {
-      margin-top: 8px;
-      padding-top: 12px;
-      border-top: 1px solid #d9e3ef;
-      color: #102a43;
-      font-size: 18px;
-      font-weight: 900;
-    }
-
-    .payment-card {
-      background: #fff;
-      border: 1px solid #d9e3ef;
-      border-radius: 8px;
-      padding: 14px 16px;
-    }
-
-    .payment-card label {
-      display: block;
-      color: #5f6671;
-      font-size: 13px;
-      font-weight: 800;
-      margin-bottom: 8px;
-    }
-
-    .payment-card select {
-      width: 100%;
-      min-height: 48px;
-      border: 1px solid #cfd9e6;
-      border-radius: 8px;
-      padding: 0 14px;
-      font-size: 15px;
-      background: #fff;
-    }
-
-    .items-table .gst-fixed-cell {
-      display: none;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
     }
 
     .employee-nav-section {
@@ -6765,8 +6217,7 @@
 
       .invoice-top-grid,
       .invoice-fields,
-      .quick-add-row,
-      .invoice-bottom-grid {
+      .quick-add-row {
         grid-template-columns: 1fr;
       }
 
@@ -7109,7 +6560,6 @@
       }
 
       .action-row .btn,
-      .action-row select.btn,
       .toolbar .btn {
         width: 100%;
         min-height: 42px;
@@ -7212,7 +6662,7 @@
       }
 
       .quick-add-row {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr 88px;
       }
 
       .quick-add-row .btn {
@@ -7421,6 +6871,9 @@
             <div class="action-row">
               <button class="btn primary" onclick="openModal('sale')"><i class="ti ti-plus"></i>New Sale
                 Invoice</button>
+              <button class="btn" onclick="exportGstSummaryReport()" style="border-color:var(--green);color:var(--green);"><i class="ti ti-receipt-tax"></i>GST Report</button>
+              <button class="btn" onclick="exportGstr1Report()" style="border-color:#1663a6;color:#1663a6;"><i class="ti ti-file-analytics"></i>GSTR-1</button>
+              <button class="btn" onclick="exportGstr3bReport()" style="border-color:#7c3aed;color:#7c3aed;"><i class="ti ti-calculator"></i>GSTR-3B</button>
               <button class="btn danger" id="delete-selected-sales-btn" onclick="deleteSelectedSales()" style="display:none;border-color:var(--red);color:var(--red);background:#fff3f3;">
                 <i class="ti ti-trash"></i>Selected Delete (<span id="selected-sale-count">0</span>)
               </button>
@@ -7487,7 +6940,7 @@
             <div class="table-wrap">
               <table id="returns-table">
                 <thead>
-                  <tr><th style="width:36px;"><input type="checkbox" id="select-all-returns" onclick="toggleAllReturns(this)" title="Sab select/deselect"></th><th>#</th><th>Platform</th><th>Order ID / AWB</th><th>Product Name</th><th>Return Date</th><th>Return Type</th><th>Status</th><th>Claim Amt</th><th>Actions</th></tr>
+                  <tr><th style="width:36px;"><input type="checkbox" id="select-all-returns" onclick="toggleAllReturns(this)" title="Sab select/deselect"></th><th>#</th><th>Platform</th><th>Order ID / AWB</th><th>Product Name</th><th>Qty</th><th>Return Date</th><th>Return Type</th><th>Status</th><th>Claim Amt</th><th>Actions</th></tr>
                 </thead>
                 <tbody id="returns-tbody"></tbody>
               </table>
@@ -7501,17 +6954,17 @@
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text"
                 placeholder="Search bills..." oninput="filterTable('purchase-table',this.value)"></div>
             <div class="action-row">
-              <button class="btn primary" onclick="openModal('purchase')"><i class="ti ti-plus"></i>New Purchase Bill</button>
-              <button class="btn danger" id="delete-selected-purchases-btn" onclick="deleteSelectedPurchases()" style="display:none;border-color:var(--red);color:var(--red);background:#fff3f3;">
-                <i class="ti ti-trash"></i>Selected Delete (<span id="selected-purchase-count">0</span>)
-              </button>
+              <button class="btn primary" onclick="openModal('purchase')"><i class="ti ti-plus"></i>New Purchase
+                Bill</button>
+              <button class="btn" onclick="exportGstSummaryReport()" style="border-color:var(--green);color:var(--green);"><i class="ti ti-receipt-tax"></i>GST Report</button>
+              <button class="btn" onclick="exportGstr3bReport()" style="border-color:#7c3aed;color:#7c3aed;"><i class="ti ti-calculator"></i>GSTR-3B</button>
             </div>
           </div>
           <div class="card">
             <div class="table-wrap">
               <table id="purchase-table">
                 <thead>
-                  <tr><th style="width:36px;"><input type="checkbox" id="select-all-purchases" onclick="toggleAllPurchases(this)" title="Sab select/deselect"></th><th>#</th><th>Bill No</th><th>Vendor Name</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th>Actions</th></tr>
+                  <tr><th>#</th><th>Bill No</th><th>Vendor Name</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th>Actions</th></tr>
                 </thead>
                 <tbody id="purchase-tbody"></tbody>
               </table>
@@ -7526,17 +6979,15 @@
                 placeholder="Search customers..." oninput="filterTable('customers-table',this.value)">
             </div>
             <div class="action-row">
-              <button class="btn primary" onclick="openPartyModal('customer')"><i class="ti ti-plus"></i>Add Customer</button>
-              <button class="btn danger" id="delete-selected-customers-btn" onclick="deleteSelectedCustomers()" style="display:none;border-color:var(--red);color:var(--red);background:#fff3f3;">
-                <i class="ti ti-trash"></i>Selected Delete (<span id="selected-customer-count">0</span>)
-              </button>
+              <button class="btn primary" onclick="openPartyModal('customer')"><i class="ti ti-plus"></i>Add
+                Customer</button>
             </div>
           </div>
           <div class="card">
             <div class="table-wrap">
               <table id="customers-table">
                 <thead>
-                  <tr><th style="width:36px;"><input type="checkbox" id="select-all-customers" onclick="toggleAllCustomers(this)" title="Sab select/deselect"></th><th>#</th><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Amount</th><th>Actions</th></tr>
+                  <tr><th>#</th><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Amount</th><th>Actions</th></tr>
                 </thead>
                 <tbody id="customers-tbody"></tbody>
               </table>
@@ -7551,26 +7002,14 @@
                 placeholder="Search products..." oninput="filterTable('products-table',this.value)"></div>
             <div class="action-row">
               <button class="btn primary" onclick="openProductModal()"><i class="ti ti-plus"></i>Add Product</button>
-              <select class="btn" id="product-stock-filter" onchange="setProductStockFilter(this.value)" title="Stock filter">
-                <option value="all">All Stock</option>
-                <option value="in">In Stock</option>
-                <option value="low">Low Stock</option>
-                <option value="out">Out of Stock</option>
-              </select>
-              <select class="btn" id="product-category-filter" onchange="setProductCategoryFilter(this.value)" title="Category filter">
-                <option value="all">All Categories</option>
-              </select>
               <button class="btn success" onclick="openProductExcelImport()"><i class="ti ti-file-spreadsheet"></i>Excel se Import</button>
-              <button class="btn danger" id="delete-selected-products-btn" onclick="deleteSelectedProducts()" style="display:none;border-color:var(--red);color:var(--red);background:#fff3f3;">
-                <i class="ti ti-trash"></i>Selected Delete (<span id="selected-product-count">0</span>)
-              </button>
             </div>
           </div>
           <div class="card">
             <div class="table-wrap">
               <table id="products-table">
                 <thead>
-                  <tr><th style="width:36px;"><input type="checkbox" id="select-all-products" onclick="toggleAllProducts(this)" title="Sab select/deselect"></th><th>#</th><th>Product</th><th>Unit</th><th>Category</th><th>Sale Price</th><th>Purchase Price</th><th>Stock</th><th>Actions</th></tr>
+                  <tr><th>#</th><th>Product</th><th>HSN/SAC</th><th>Unit</th><th>Sale Price</th><th>Purchase Price</th><th>GST</th><th>Stock</th><th>Actions</th></tr>
                 </thead>
                 <tbody id="products-tbody"></tbody>
               </table>
@@ -7584,17 +7023,15 @@
             <div class="search-wrap"><i class="ti ti-search"></i><input type="text"
                 placeholder="Search vendors..." oninput="filterTable('vendors-table',this.value)"></div>
             <div class="action-row">
-              <button class="btn primary" onclick="openPartyModal('vendor')"><i class="ti ti-plus"></i>Add Vendor</button>
-              <button class="btn danger" id="delete-selected-vendors-btn" onclick="deleteSelectedVendors()" style="display:none;border-color:var(--red);color:var(--red);background:#fff3f3;">
-                <i class="ti ti-trash"></i>Selected Delete (<span id="selected-vendor-count">0</span>)
-              </button>
+              <button class="btn primary" onclick="openPartyModal('vendor')"><i class="ti ti-plus"></i>Add
+                Vendor</button>
             </div>
           </div>
           <div class="card">
             <div class="table-wrap">
               <table id="vendors-table">
                 <thead>
-                  <tr><th style="width:36px;"><input type="checkbox" id="select-all-vendors" onclick="toggleAllVendors(this)" title="Sab select/deselect"></th><th>#</th><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Amount</th><th>Actions</th></tr>
+                  <tr><th>#</th><th>Name</th><th>Phone</th><th>GSTIN</th><th>Total Bills</th><th>Amount</th></tr>
                 </thead>
                 <tbody id="vendors-tbody"></tbody>
               </table>
@@ -7661,7 +7098,7 @@
                   <div id="biz-preview-name" style="font-size:28px;font-weight:900;letter-spacing:0;margin-bottom:10px;">Your Company Name</div>
                   <div id="biz-preview-meta" style="font-size:14px;line-height:1.8;color:rgba(255,255,255,.88)">Phone / Email</div>
                 </div>
-                <p style="margin-top:14px;color:var(--muted);font-size:13px;line-height:1.6;">Tip: Invoice mein GST rate fixed 18% rahega.</p>
+                <p style="margin-top:14px;color:var(--muted);font-size:13px;line-height:1.6;">Tip: Customer/Vendor GSTIN aur company GSTIN ke state code se invoice mein CGST+SGST ya IGST auto select hoga.</p>
               </div>
             </div>
           </div>
@@ -7669,18 +7106,20 @@
 
         <!-- SPREADSHEET REPORT -->
         <div class="page" id="page-spreadreport">
-          <div class="toolbar" style="display:flex;flex-wrap:nowrap;align-items:center;gap:8px;overflow-x:auto;overflow-y:hidden;padding-bottom:2px;scrollbar-width:thin;">
-              <button class="btn" id="ss-tab-sales" onclick="ssShowTab('sales')" style="background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:700;white-space:nowrap;"><i class="ti ti-file-invoice"></i> Sales</button>
-              <button class="btn" id="ss-tab-purchase" onclick="ssShowTab('purchase')" style="font-weight:700;white-space:nowrap;"><i class="ti ti-shopping-cart"></i> Purchase</button>
-              <button class="btn" id="ss-tab-returns" onclick="ssShowTab('returns')" style="font-weight:700;white-space:nowrap;"><i class="ti ti-truck-return"></i> Customer Returns</button>
-
-              <button class="btn" id="ss-tab-summary" onclick="ssShowTab('summary')" style="font-weight:700;white-space:nowrap;"><i class="ti ti-chart-bar"></i> Summary</button>
-              <button class="btn" id="ss-tab-online" onclick="ssShowTab('online')" style="font-weight:700;white-space:nowrap;"><i class="ti ti-brand-google"></i> Google Sheet</button>
-              <div style="width:1px;background:var(--line);height:28px;margin:0 4px;flex-shrink:0;"></div>
-              <input type="date" id="ss-date-from" onchange="ssRender()" style="border:1px solid var(--line);border-radius:var(--radius);padding:6px 10px;font-size:13px;white-space:nowrap;flex-shrink:0;" title="From Date">
-              <input type="date" id="ss-date-to" onchange="ssRender()" style="border:1px solid var(--line);border-radius:var(--radius);padding:6px 10px;font-size:13px;white-space:nowrap;flex-shrink:0;" title="To Date">
-              <button class="btn" onclick="ssClearDates()" style="font-size:12px;white-space:nowrap;flex-shrink:0;">✕ Clear Filter</button>
-              <button class="btn primary" onclick="ssExportExcel()" style="background:var(--green);border-color:var(--green);white-space:nowrap;flex-shrink:0;"><i class="ti ti-download"></i> Excel Export</button>
+          <div class="toolbar" style="flex-wrap:wrap;gap:8px;">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <button class="btn" id="ss-tab-sales" onclick="ssShowTab('sales')" style="background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:700;"><i class="ti ti-file-invoice"></i> Sales</button>
+              <button class="btn" id="ss-tab-purchase" onclick="ssShowTab('purchase')" style="font-weight:700;"><i class="ti ti-shopping-cart"></i> Purchase</button>
+              <button class="btn" id="ss-tab-returns" onclick="ssShowTab('returns')" style="font-weight:700;"><i class="ti ti-truck-return"></i> Customer Returns</button>
+              <button class="btn" id="ss-tab-summary" onclick="ssShowTab('summary')" style="font-weight:700;"><i class="ti ti-chart-bar"></i> Summary</button>
+              <button class="btn" id="ss-tab-online" onclick="ssShowTab('online')" style="font-weight:700;"><i class="ti ti-brand-google"></i> Google Sheet</button>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <input type="date" id="ss-date-from" onchange="ssRender()" style="border:1px solid var(--line);border-radius:var(--radius);padding:6px 10px;font-size:13px;" title="From Date">
+              <input type="date" id="ss-date-to" onchange="ssRender()" style="border:1px solid var(--line);border-radius:var(--radius);padding:6px 10px;font-size:13px;" title="To Date">
+              <button class="btn" onclick="ssClearDates()" style="font-size:12px;">✕ Clear Filter</button>
+              <button class="btn primary" onclick="ssExportExcel()" style="background:var(--green);border-color:var(--green);"><i class="ti ti-download"></i> Excel Export</button>
+            </div>
           </div>
           <!-- Summary Cards -->
           <div id="ss-summary-cards" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;"></div>
@@ -7725,9 +7164,9 @@
         <div style="margin-bottom:14px; padding:12px; background:#f7f9fb; border:1px dashed var(--line); border-radius:var(--radius);">
           <label style="font-weight:700; font-size:13px; display:block; margin-bottom:6px;">📋 Notepad se Bulk Paste karein</label>
           <p style="font-size:12px; color:var(--muted); margin:0 0 8px;">Har line ek return entry. Columns ko <strong>Tab</strong> ya <strong>Comma</strong> se alag karein (jo bhi aapke Notepad mein hai, system khud detect kar lega).<br>
-          Order: <strong>Platform, Order ID, Product Name, Date, Return Type, Status, Amount</strong> — <strong>sirf Product Name zaroori hai</strong>, baaki khali chhod sakte hain.<br>
-          Example: <code>meesho, ORD123, Red T-Shirt, 2026-06-17, RTO (Courier Return), pending, 499</code></p>
-          <textarea id="bulk-paste-area" rows="5" placeholder="meesho, ORD123, Red T-Shirt, 2026-06-17, RTO (Courier Return), pending, 499&#10;flipkart, , Blue Jeans, 2026-06-17, Customer Return, received, 899&#10;Black Shoes" style="width:100%; border:1px solid var(--line); border-radius:var(--radius); padding:10px; font-size:13px; font-family:inherit;"></textarea>
+          Order: <strong>Platform, Order ID, Product Name, Qty, Date, Return Type, Status, Amount</strong> — <strong>sirf Product Name zaroori hai</strong>, baaki khali chhod sakte hain.<br>
+          Example: <code>meesho, ORD123, Red T-Shirt, 2, 2026-06-17, RTO (Courier Return), pending, 499</code></p>
+          <textarea id="bulk-paste-area" rows="5" placeholder="meesho, ORD123, Red T-Shirt, 2, 2026-06-17, RTO (Courier Return), pending, 499&#10;flipkart, , Blue Jeans, 1, 2026-06-17, Customer Return, received, 899&#10;Black Shoes" style="width:100%; border:1px solid var(--line); border-radius:var(--radius); padding:10px; font-size:13px; font-family:inherit;"></textarea>
           <div style="margin-top:8px; display:flex; gap:10px; flex-wrap:wrap;">
             <button class="btn sm primary" onclick="parseBulkPaste()"><i class="ti ti-clipboard-plus"></i> Paste ko Rows mein Convert karein</button>
             <span style="font-size:12px; color:var(--muted); align-self:center;">Rows neeche table mein add ho jayengi (existing rows ke saath)</span>
@@ -7742,7 +7181,7 @@
         </div>
         <div class="table-wrap" style="max-height:50vh; overflow-y:auto;">
           <table class="bulk-return-table" id="bulk-return-table">
-            <thead><tr><th style="width:10%;">Platform</th><th style="width:15%;">Order ID / AWB</th><th style="width:18%;">Product Name</th><th style="width:12%;">Date</th><th style="width:13%;">Return Type</th><th style="width:13%;">Status</th><th style="width:10%;">Amount (₹)</th><th style="width:5%;">Action</th></tr></thead>
+            <thead><tr><th style="width:10%;">Platform</th><th style="width:14%;">Order ID / AWB</th><th style="width:18%;">Product Name</th><th style="width:7%;">Qty</th><th style="width:12%;">Date</th><th style="width:13%;">Return Type</th><th style="width:12%;">Status</th><th style="width:9%;">Amount (₹)</th><th style="width:5%;">Action</th></tr></thead>
             <tbody id="bulk-rows-body"></tbody>
           </table>
         </div>
@@ -7767,64 +7206,49 @@
       <div class="invoice-create-body">
         <div class="invoice-top-grid">
           <div class="soft-panel">
-            <div class="panel-label-row"><label id="party-label" for="f-party">Select Customer</label><button class="link-btn" id="party-create-btn" onclick="openPartyModal('customer')">+ Create Customer</button></div>
+            <div class="panel-label-row"><label id="party-label" for="f-party">Select Customer</label><button class="link-btn" onclick="openPartyModal('customer')">+ Create Customer</button></div>
             <input type="text" id="f-party" list="party-list" placeholder="Search customers..." oninput="updateTotals()">
             <datalist id="party-list"></datalist><input type="hidden" id="f-phone">
           </div>
           <div class="soft-panel neutral">
             <div class="invoice-fields">
-              <div class="form-group"><label for="f-date">Invoice Date</label><input type="date" id="f-date"></div>
-              <div class="form-group"><label for="f-due">Due Date</label><input type="date" id="f-due"></div>
-              <div class="form-group sale-type-group"><label>Sale Type</label><select id="f-sale-type"><option value="online">Online Sales</option><option value="offline">Offline Sales</option></select></div>
-              <div class="form-group reference-field"><label>Reference</label><input type="text" id="f-notes" placeholder="Reference"></div>
-              <div class="form-group" style="display:none"><label>GST Type</label><select id="f-gst-type" onchange="updateTotals()"><option value="intrastate">18% GST</option></select></div>
+              <div class="form-group"><label>Invoice Date</label><input type="date" id="f-date"></div>
+              <div class="form-group"><label>Due Date</label><input type="date" id="f-due"></div>
+              <div class="form-group"><label>Reference</label><input type="text" id="f-notes" placeholder="Reference note (optional)"></div>
+              <div class="form-group"><label>GST Type</label><select id="f-gst-type" onchange="updateTotals()"><option value="auto">Auto by GSTIN</option><option value="intrastate">CGST + SGST</option><option value="interstate">IGST</option></select></div>
             </div>
           </div>
         </div>
         <datalist id="product-list"></datalist>
         <div class="product-entry">
           <div class="quick-add-row">
-            <select id="quick-product-filter" onchange="filterQuickProducts()" title="Filter products">
-              <option value="all">Filter Category</option>
-              <option value="in">In Stock</option>
-              <option value="low">Low Stock</option>
-              <option value="out">Out of Stock</option>
-            </select>
-            <div class="product-search-wrap" style="position:relative;">
-              <input type="text" id="quick-product" placeholder="Search product..." oninput="showProductDropdown(this.value)" onfocus="showProductDropdown(this.value)" autocomplete="off" onkeydown="handleProductKey(event)">
-              <div id="product-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid #c5d3e0;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.13);z-index:9999;max-height:260px;overflow-y:auto;margin-top:4px;"></div>
-            </div>
+            <input type="text" list="product-list" id="quick-product" placeholder="Search product...">
             <input type="number" id="quick-qty" min="1" value="1" placeholder="Qty">
             <button class="btn primary" onclick="addQuickProduct()"><i class="ti ti-plus"></i>Add to Bill</button>
           </div>
           <div class="table-wrap">
             <table class="items-table">
-              <thead><tr><th style="width:40%">Product Name</th><th style="width:13%">Quantity</th><th style="width:13%">Unit</th><th style="width:17%">Unit Price</th><th style="width:10%">GST %</th><th></th></tr></thead>
+              <thead><tr><th style="width:28%">Product Name</th><th style="width:12%">HSN/SAC</th><th style="width:10%">Quantity</th><th style="width:12%">Unit</th><th style="width:17%">Unit Price</th><th style="width:13%">GST%</th><th></th></tr></thead>
               <tbody id="items-body"></tbody>
             </table>
           </div>
           <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
             <button class="btn sm" onclick="addItemRow()"><i class="ti ti-plus"></i>Add Custom Item</button>
-            <button class="btn sm" id="gst-toggle-btn" onclick="toggleGst()" style="background:#e8f5e9;border:1.5px solid #43a047;color:#2e7d32;font-weight:700;display:flex;align-items:center;gap:5px;padding:0 12px;height:32px;border-radius:6px;font-size:12.5px;transition:all 0.2s;">
-              <i class="ti ti-receipt-tax" style="font-size:14px;"></i>18% GST: <span id="gst-toggle-label" style="margin-left:2px;">ON</span>
-            </button>
           </div>
+          <div class="stock-chips" id="stock-chip-list"></div>
         </div>
-        <div class="invoice-bottom-grid">
-          <div class="total-section" id="totals-section">
-            <div class="total-head"><span>Bill Summary</span><small>GST fixed 18%</small></div>
-            <div class="total-row"><span>GST Rate</span><span id="t-gst-type">18%</span></div>
-            <div class="total-row"><span>Subtotal</span><span id="t-sub">₹0</span></div>
-            <div class="total-row" id="t-cgst-row" style="display:none"><span>CGST</span><span id="t-cgst">₹0</span></div>
-            <div class="total-row" id="t-sgst-row" style="display:none"><span>SGST</span><span id="t-sgst">₹0</span></div>
-            <div class="total-row" id="t-igst-row" style="display:none"><span>IGST</span><span id="t-igst">₹0</span></div>
-            <div class="total-row"><span>GST</span><span id="t-gst">₹0</span></div>
-            <div class="total-row grand"><span>Total</span><span id="t-total">₹0</span></div>
-          </div>
-          <div class="payment-card">
-            <label>Payment Status</label>
-            <select id="f-status"><option value="pending">Pending</option><option value="paid">Paid</option><option value="cancelled">Cancelled</option></select>
-          </div>
+        <div class="total-section" id="totals-section">
+          <div class="total-row"><span>GST Mode</span><span id="t-gst-type">CGST + SGST</span></div>
+          <div class="total-row"><span>Subtotal</span><span id="t-sub">₹0</span></div>
+          <div class="total-row" id="t-cgst-row"><span>CGST</span><span id="t-cgst">₹0</span></div>
+          <div class="total-row" id="t-sgst-row"><span>SGST</span><span id="t-sgst">₹0</span></div>
+          <div class="total-row" id="t-igst-row" style="display:none"><span>IGST</span><span id="t-igst">₹0</span></div>
+          <div class="total-row"><span>GST</span><span id="t-gst">₹0</span></div>
+          <div class="total-row grand"><span>Total</span><span id="t-total">₹0</span></div>
+        </div>
+        <div class="form-row" style="margin-top:18px">
+          <div class="form-group"><label>Payment Status</label><select id="f-status"><option value="pending">Pending</option><option value="paid">Paid</option><option value="cancelled">Cancelled</option></select></div>
+          <div></div>
         </div>
       </div>
     </div>
@@ -7849,9 +7273,8 @@
     <div class="modal" style="width:560px">
       <div class="modal-head"><h2 id="product-modal-title">Add Product</h2><button class="btn sm icon" onclick="closeProductModal()"><i class="ti ti-x"></i></button></div>
       <div class="modal-body">
-        <div class="form-group" style="margin-bottom:12px"><label>Product Name</label><input type="text" id="pr-name" placeholder="Product / service name"></div>
-        <div class="form-row"><div class="form-group"><label>Unit</label><input type="text" id="pr-unit" placeholder="pcs, kg, box"></div><div class="form-group"><label>Category</label><input type="text" id="pr-category" list="category-list" placeholder="e.g. Electronics, Cloth..."><datalist id="category-list"></datalist></div></div>
-        <div class="form-group" style="display:none"><label>GST %</label><input type="number" id="pr-gst" min="0" max="100" value="18" placeholder="18"></div>
+        <div class="form-row"><div class="form-group"><label>Product Name</label><input type="text" id="pr-name" placeholder="Product / service name"></div><div class="form-group"><label>HSN/SAC</label><input type="text" id="pr-hsn" placeholder="e.g. 6109"></div></div>
+        <div class="form-row"><div class="form-group"><label>Unit</label><input type="text" id="pr-unit" placeholder="pcs, kg, box"></div><div class="form-group"><label>GST %</label><input type="number" id="pr-gst" min="0" max="100" placeholder="18"></div></div>
         <div class="form-row"><div class="form-group"><label>Sale Price</label><input type="number" id="pr-sale" min="0" placeholder="0"></div><div class="form-group"><label>Purchase Price</label><input type="number" id="pr-purchase" min="0" placeholder="0"></div></div>
         <div class="form-row" style="margin-bottom:0"><div class="form-group"><label>Opening Stock</label><input type="number" id="pr-stock" min="0" placeholder="0"></div><div></div></div>
       </div>
@@ -7904,7 +7327,7 @@
           <div style="font-size:12px; font-weight:700; color:#ff6b00; margin-top:10px;">UPI ID: 7210042800@kotakbank</div>
         </div>
         <div style="text-align:left; display:flex; flex-direction:column; gap:12px;">
-          <div class="form-group"><label>Card Number / UPI Transaction ID</label><input type="text" id="pay-transaction-id" value="7210042800" placeholder="Order ID / UPI Ref No."></div>
+          <div class="form-group"><label>Card Number / UPI Transaction ID</label><input type="text" id="pay-transaction-id" placeholder="Enter UPI Ref No. or Card Number"></div>
         </div>
         <div id="payment-status-message" style="margin-top:16px; font-weight:700; display:none;"></div>
       </div>
@@ -7966,7 +7389,7 @@
       <div class="modal-body" style="padding:20px;">
         <div style="background:#f0f9f4;border:1px dashed var(--green);border-radius:var(--radius);padding:14px;margin-bottom:16px;font-size:13px;">
           <strong>📋 Format Guide:</strong> Excel/CSV file mein ye columns hone chahiye (header row zaroori hai):<br>
-          <code style="background:#e8f5e9;padding:2px 8px;border-radius:4px;font-size:12px;">Product Name, Unit, Sale Price, Purchase Price, Stock</code><br>
+          <code style="background:#e8f5e9;padding:2px 8px;border-radius:4px;font-size:12px;">Product Name, HSN/SAC, Unit, Sale Price, Purchase Price, GST%, Stock</code><br>
           <span style="color:var(--muted);">Sirf <strong>Product Name</strong> column compulsory hai. Baaki columns optional hain. Column order auto-detect hoga.</span>
         </div>
 
@@ -7979,7 +7402,7 @@
 
         <div style="margin-bottom:14px;">
           <label style="font-weight:700;font-size:13px;display:block;margin-bottom:8px;">Notepad / Excel se copy-paste</label>
-          <textarea id="product-import-paste" rows="6" placeholder="Product Name, Unit, Sale Price, Purchase Price, Stock&#10;Shirt, pcs, 499, 300, 20&#10;Jeans, pcs, 999, 650, 10" style="border:1px solid var(--line);border-radius:var(--radius);padding:10px;width:100%;font-size:13px;resize:vertical;"></textarea>
+          <textarea id="product-import-paste" rows="6" placeholder="Product Name, HSN/SAC, Unit, Sale Price, Purchase Price, GST%, Stock&#10;Shirt, 6109, pcs, 499, 300, 5, 20&#10;Jeans, 6203, pcs, 999, 650, 5, 10" style="border:1px solid var(--line);border-radius:var(--radius);padding:10px;width:100%;font-size:13px;resize:vertical;"></textarea>
           <button class="btn sm primary" onclick="parseProductImportPaste()" style="margin-top:8px;background:var(--blue);border-color:var(--blue);"><i class="ti ti-clipboard-plus"></i>Paste Preview</button>
         </div>
 
