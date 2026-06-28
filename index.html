@@ -1971,6 +1971,12 @@
         showToast('warning', 'Person name, product name aur repair date zaroor bharein.');
         return;
       }
+      const selectedCustomer = (store.customers || []).find(entry =>
+        String(entry.name || '').trim().toLowerCase() === customer.toLowerCase());
+      if (!selectedCustomer) {
+        showToast('warning', 'Ye person Customers list mein nahi hai. Pehle customer add karein.');
+        return;
+      }
       const selectedProduct = (store.products || []).find(product =>
         String(product.name || '').trim().toLowerCase() === item.toLowerCase());
       if (!selectedProduct) {
@@ -2029,12 +2035,6 @@
 
     function openConsignmentModal(idx = -1) {
       updateProductList();
-      const customerList = document.getElementById('cons-customer-list');
-      const customerNames = [...new Set((store.customers || [])
-        .map(customer => String(customer.name || '').trim())
-        .filter(Boolean))].sort((a, b) => a.localeCompare(b));
-      customerList.innerHTML = customerNames
-        .map(name => `<option value="${esc(name)}"></option>`).join('');
       const modal = document.getElementById('consignment-modal');
       modal.dataset.editIndex = idx;
       const entry = idx >= 0 ? store.consignments[idx] : null;
@@ -3523,31 +3523,26 @@
       }).filter(p => {
         if (!q) return true;
         const name = String(p.name || '').toLowerCase();
-        const unit = String(p.unit || '').toLowerCase();
-        return name.includes(q) || unit.includes(q) || q.split(/\s+/).every(word => name.includes(word));
-      }).slice(0, 60);
+        return name.startsWith(q);
+      }).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en', { sensitivity: 'base' })).slice(0, 60);
     }
 
     function buildDropdownHTML(products) {
       if (!products.length) return '<div class="cpd-empty">Koi product nahi mila</div>';
-      return products.map((p, i) => {
-        const stock = p.stock || 0;
-        const badgeClass = stock <= 0 ? 'cpd-stock-out' : stock <= 5 ? 'cpd-stock-low' : 'cpd-stock-in';
-        const badgeText = stock <= 0 ? 'Out' : stock <= 5 ? 'Low: ' + stock : stock;
-        return `<div class="cpd-item" data-index="${i}" onmousedown="event.preventDefault()" onclick="selectProductFromDropdown(this)">
-          <span class="cpd-name">${esc(p.name)}</span>
-          <span class="cpd-meta">
-            <span>${fmt(p.salePrice||0)}</span>
-            <span>${p.unit||'pcs'}</span>
-          </span>
-          <span class="cpd-stock-badge ${badgeClass}">${badgeText}</span>
-        </div>`;
-      }).join('');
+      return products.map((p, i) => `<div class="cpd-item" data-index="${i}"
+        onmousedown="event.preventDefault()" onclick="selectProductFromDropdown(this)">
+        <span class="cpd-name">${esc(p.name)}</span>
+      </div>`).join('');
     }
 
     function showProductDropdown(inputEl, dropdownId) {
       const dropdown = document.getElementById(dropdownId);
       if (!dropdown) return;
+      if (!String(inputEl.value || '').trim()) {
+        dropdown.innerHTML = '';
+        dropdown.style.display = 'none';
+        return;
+      }
       const products = getFilteredProducts(inputEl.value);
       dropdown.innerHTML = buildDropdownHTML(products);
       dropdown.style.display = 'block';
@@ -3562,6 +3557,37 @@
       if (el) el.style.display = 'none';
     }
 
+    function showCustomerDropdown(inputEl, dropdownId) {
+      const dropdown = document.getElementById(dropdownId);
+      if (!inputEl || !dropdown) return;
+      const q = String(inputEl.value || '').trim().toLowerCase();
+      if (!q) {
+        dropdown.innerHTML = '';
+        dropdown.style.display = 'none';
+        return;
+      }
+      const customers = (store.customers || []).filter(customer =>
+        String(customer.name || '').trim().toLowerCase().startsWith(q)
+      ).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'en', { sensitivity: 'base' })).slice(0, 60);
+      dropdown.innerHTML = customers.length
+        ? customers.map((customer, index) => `<div class="cpd-item" data-index="${index}"
+            onmousedown="event.preventDefault()" onclick="selectCustomerFromDropdown(this)">
+            <span class="cpd-name">${esc(customer.name)}</span>
+          </div>`).join('')
+        : '<div class="cpd-empty">Koi customer nahi mila</div>';
+      dropdown._customers = customers;
+      dropdown._targetInput = inputEl;
+      dropdown.style.display = 'block';
+    }
+
+    function selectCustomerFromDropdown(itemEl) {
+      const dropdown = itemEl.closest('.custom-product-dropdown');
+      const customer = dropdown?._customers?.[parseInt(itemEl.dataset.index, 10)];
+      if (!customer || !dropdown._targetInput) return;
+      dropdown._targetInput.value = customer.name;
+      dropdown.style.display = 'none';
+    }
+
     // ─── PARTY (CUSTOMER/VENDOR) CUSTOM DROPDOWN ─────────────────────────────
     function showPartyDropdown() {
       const input = document.getElementById('f-party');
@@ -3571,39 +3597,30 @@
       const parties = isSale ? (store.customers || []) : (store.vendors || []);
       const q = input.value.trim().toLowerCase();
       const currentVal = input.value.trim();
+      if (!q) {
+        dropdown.innerHTML = '';
+        dropdown.style.display = 'none';
+        dropdown._parties = [];
+        return;
+      }
 
       const filtered = parties.filter(p =>
-        !q || String(p.name||'').toLowerCase().includes(q)
-      ).slice(0, 60);
+        String(p.name || '').trim().toLowerCase().startsWith(q)
+      ).sort((a, b) => {
+        const aName = String(a.name || '').trim();
+        const bName = String(b.name || '').trim();
+        return aName.localeCompare(bName, 'en', { sensitivity: 'base' });
+      }).slice(0, 60);
 
       if (!filtered.length) {
         dropdown.innerHTML = `<div class="cpd-empty">Koi ${isSale ? 'customer' : 'vendor'} nahi mila</div>`;
       } else {
-        dropdown.innerHTML = filtered.map((p, i) => {
-          const bills = isSale
-            ? (store.sales||[]).filter(s => s.party === p.name)
-            : (store.purchases||[]).filter(s => s.party === p.name);
-          const pending = bills.filter(r => r.status !== 'paid').length;
-          const isSelected = p.name === currentVal;
-          const badgeHtml = isSelected
-            ? `<span class="cpd-stock-badge" style="background:#1a73e8;color:#fff;">✓ Selected</span>`
-            : pending > 0
-              ? `<span class="cpd-stock-badge cpd-stock-low">${pending} Pending</span>`
-              : bills.length > 0
-                ? `<span class="cpd-stock-badge cpd-stock-in">${bills.length} Bills</span>`
-                : '';
-          return `<div class="cpd-item${isSelected ? ' cpd-active' : ''}" data-index="${i}" data-pname="${i}"
+        dropdown.innerHTML = filtered.map((p, i) =>
+          `<div class="cpd-item" data-index="${i}" data-pname="${i}"
             onmousedown="event.preventDefault()"
-            onclick="selectPartyFromDropdown(${i})"
-            style="${isSelected ? 'background:linear-gradient(90deg,#e8f0fe,#dbeafe);border-left:3px solid #1a73e8;' : ''}">
-            <span class="cpd-name" style="${isSelected ? 'color:#1a73e8;font-weight:800;' : ''}">${esc(p.name)}</span>
-            <span class="cpd-meta">
-              <span style="color:#555;">${p.phone ? '📞 ' + p.phone : ''}</span>
-              <span style="color:#888;">${p.address ? p.address.split(',')[0] : ''}</span>
-            </span>
-            ${badgeHtml}
-          </div>`;
-        }).join('');
+            onclick="selectPartyFromDropdown(${i})">
+            <span class="cpd-name">${esc(p.name)}</span>
+          </div>`).join('');
       }
 
       dropdown._parties = filtered;
@@ -3706,6 +3723,11 @@
       if (!td) return;
       const dropdown = td.querySelector('.bulk-product-dropdown');
       if (!dropdown) return;
+      if (!String(inputEl.value || '').trim()) {
+        dropdown.innerHTML = '';
+        dropdown.style.display = 'none';
+        return;
+      }
       const products = getFilteredProducts(inputEl.value, 'all');
       dropdown.innerHTML = buildDropdownHTML(products);
       dropdown.style.display = 'block';
@@ -3749,6 +3771,11 @@
     function updateQuickProductSuggestions(input) {
       const dropdown = document.getElementById('product-dropdown-main');
       if (!dropdown) return;
+      if (!String(input?.value || '').trim()) {
+        dropdown.innerHTML = '';
+        dropdown.style.display = 'none';
+        return;
+      }
       const products = getFilteredProducts(input?.value || '');
       dropdown.innerHTML = buildDropdownHTML(products);
       dropdown.style.display = 'block';
@@ -4433,7 +4460,9 @@
       const q = queryText.toLowerCase().trim();
       document.querySelectorAll(`#${tableId} tbody tr`).forEach(tr => {
         if (tr.classList.contains('empty')) return;
-        tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+        const cells = Array.from(tr.cells || []);
+        const matches = !q || cells.some(cell => cell.textContent.trim().toLowerCase().startsWith(q));
+        tr.style.display = matches ? '' : 'none';
       });
     }
 
@@ -4588,6 +4617,8 @@
     window.closeProductDropdown = closeProductDropdown;
     window.selectProductFromDropdown = selectProductFromDropdown;
     window.handleProductSearchKey = handleProductSearchKey;
+    window.showCustomerDropdown = showCustomerDropdown;
+    window.selectCustomerFromDropdown = selectCustomerFromDropdown;
     window.showPartyDropdown = showPartyDropdown;
     window.closePartyDropdown = closePartyDropdown;
     window.selectPartyFromDropdown = selectPartyFromDropdown;
@@ -8443,7 +8474,7 @@
       <div class="modal-head"><h2 id="repair-modal-title">Add Repair</h2><button class="btn sm icon" onclick="closeRepairModal()"><i class="ti ti-x"></i></button></div>
       <div class="modal-body">
         <div class="form-row">
-          <div class="form-group"><label>Person Name *</label><input id="repair-customer" type="text" placeholder="Person name"></div>
+          <div class="form-group"><label>Person Name *</label><div style="position:relative;"><input id="repair-customer" type="text" placeholder="Type customer name" autocomplete="off" oninput="showCustomerDropdown(this,'customer-dropdown-repair')" onfocus="showCustomerDropdown(this,'customer-dropdown-repair')" onblur="setTimeout(()=>closeProductDropdown('customer-dropdown-repair'),180)" style="width:100%;"><div id="customer-dropdown-repair" class="custom-product-dropdown" style="display:none;"></div></div></div>
           <div class="form-group"><label>Product Name *</label><div style="position:relative;"><input id="repair-item" type="text" placeholder="Type ya select product" autocomplete="off" oninput="showProductDropdown(this,'product-dropdown-repair')" onfocus="showProductDropdown(this,'product-dropdown-repair')" onblur="setTimeout(()=>closeProductDropdown('product-dropdown-repair'),180)" onkeydown="handleProductSearchKey(event,'product-dropdown-repair')" style="width:100%;"><div id="product-dropdown-repair" class="custom-product-dropdown" style="display:none;"></div></div></div>
         </div>
         <div class="form-row">
@@ -8473,7 +8504,7 @@
     <div class="modal" style="width:500px">
       <div class="modal-head"><h2 id="consignment-modal-title">Add Consignment</h2><button class="btn sm icon" onclick="closeConsignmentModal()"><i class="ti ti-x"></i></button></div>
       <div class="modal-body">
-        <div class="form-group" style="margin-bottom:12px"><label>Customer</label><input type="text" id="cons-party" list="cons-customer-list" placeholder="Type ya select customer" autocomplete="off"><datalist id="cons-customer-list"></datalist></div>
+        <div class="form-group" style="margin-bottom:12px"><label>Customer</label><div style="position:relative;"><input type="text" id="cons-party" placeholder="Type customer name" autocomplete="off" oninput="showCustomerDropdown(this,'customer-dropdown-cons')" onfocus="showCustomerDropdown(this,'customer-dropdown-cons')" onblur="setTimeout(()=>closeProductDropdown('customer-dropdown-cons'),180)" style="width:100%;"><div id="customer-dropdown-cons" class="custom-product-dropdown" style="display:none;"></div></div></div>
         <div class="form-group" style="margin-bottom:12px"><label>Product Name</label><div style="position:relative;"><input type="text" id="cons-product" placeholder="Type or select product" autocomplete="off" oninput="showProductDropdown(this,'product-dropdown-cons')" onfocus="showProductDropdown(this,'product-dropdown-cons')" onblur="setTimeout(()=>closeProductDropdown('product-dropdown-cons'),180)" onkeydown="handleProductSearchKey(event,'product-dropdown-cons')" style="width:100%;"><div id="product-dropdown-cons" class="custom-product-dropdown" style="display:none;"></div></div></div>
         <div class="form-row">
           <div class="form-group"><label>Quantity</label><input type="number" id="cons-qty" min="1" value="1"></div>
